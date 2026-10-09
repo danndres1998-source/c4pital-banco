@@ -6,7 +6,9 @@ Es una página web que funciona en cualquier navegador, sin instalar nada y sin 
 
 ## Qué puede hacer
 
-La app imita una banca móvil real, organizada por **departamentos**: cuentas, tarjeta de crédito, préstamos, certificados de depósito, divisas, calculadoras financieras y tarifario. Cada operación va paso a paso, muestra sus cargos antes de confirmar, se autoriza con clave y entrega un comprobante.
+En computadora se ve como una **banca en línea** (encabezado con el nombre del cliente y su último acceso, menú lateral por secciones, barra de tasa de cambio y resumen de productos con Disponible, Balance actual, Balance al corte y Puntos). En celular se ve como app móvil. La entrada tiene tarjeta de bienvenida y **teclado virtual** para escribir la clave.
+
+La app está organizada por **departamentos**: cuentas, tarjeta de crédito, préstamos, certificados de depósito, divisas, calculadoras financieras y tarifario. Cada operación va paso a paso, muestra sus cargos antes de confirmar, se autoriza con clave y entrega un comprobante.
 
 **Estudiantes** (entran con su nombre o número de cuenta y una clave de 4 números)
 
