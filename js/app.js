@@ -90,6 +90,34 @@
     }
   }
 
+  const CLAVE_ACCESOS = 'c4pital-accesos';
+
+  /** Guarda la fecha de este acceso y recuerda la anterior para mostrar "Último acceso". */
+  function registrarAcceso(numero) {
+    let mapa = {};
+    try {
+      mapa = JSON.parse(localStorage.getItem(CLAVE_ACCESOS) || '{}') || {};
+    } catch (e) {
+      mapa = {};
+    }
+    ui.ultimo = { numero, fecha: mapa[numero] || null };
+    mapa[numero] = new Date().toISOString();
+    try {
+      localStorage.setItem(CLAVE_ACCESOS, JSON.stringify(mapa));
+    } catch (e) {
+      /* sin almacenamiento: se ignora */
+    }
+  }
+
+  function ultimoAcceso(numero) {
+    if (ui.ultimo && ui.ultimo.numero === numero) return ui.ultimo.fecha;
+    try {
+      return (JSON.parse(localStorage.getItem(CLAVE_ACCESOS) || '{}') || {})[numero] || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   window.addEventListener('storage', (e) => {
     if (e.key === CLAVE) {
       estado = cargar();
@@ -212,7 +240,7 @@
         '<div class="hoja-icono' + (op.peligro ? ' rojo' : '') + '">' + I(op.icono || (op.peligro ? 'alerta' : 'info')) + '</div>' +
         '<h3>' + esc(op.titulo) + '</h3><p>' + op.texto + '</p>' +
         (op.entrada ? '<label class="campo" style="margin-bottom:18px"><span>' + esc(op.entrada) + '</span><div class="control"><input data-hoja-entrada autocomplete="off" /></div></label>' : '') +
-        '<div class="botones dos"><button class="boton borde" data-r="no">' + esc(op.cancelar || 'Cancelar') + '</button>' +
+        '<div class="botones' + (op.soloOk ? '' : ' dos') + '">' + (op.soloOk ? '' : '<button class="boton borde" data-r="no">' + esc(op.cancelar || 'Cancelar') + '</button>') +
         '<button class="boton' + (op.peligro ? ' peligro' : '') + '" data-r="si">' + esc(op.ok || 'Aceptar') + '</button></div></div>';
       function cerrar(valor) {
         velo.remove();
@@ -341,36 +369,79 @@
   // Acceso
   // ==========================================================
 
-  function vistaAcceso() {
-    const nombres = estado.clientes.map((c) => '<option value="' + esc(c.nombre) + '">' + esc(c.numero) + '</option>').join('');
-    let tarjeta;
-    if (ui.accesoDocente) {
-      tarjeta =
-        '<div><h2>Acceso docente</h2><p class="ayuda">Administra las cuentas, aprueba préstamos y cierra el mes.</p></div>' +
-        '<form class="formulario" data-form="entrar-docente">' +
-        campo('Clave de docente', '<input class="pin" name="pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off" required placeholder="••••" />', 'llave') +
-        '<button class="boton">' + I('escudo') + 'Entrar al panel</button></form>' +
-        (estado.config.pinDocente === B.CONFIG_INICIAL.pinDocente ? '<div class="aviso-banner azul">' + I('info') + '<span>La clave inicial es <strong>1234</strong>. Cámbiala en Ajustes.</span></div>' : '') +
-        '<div class="acceso-pie"><button class="enlace" data-accion="acceso-estudiante">Volver al acceso de estudiantes</button></div>';
-    } else {
-      tarjeta =
-        '<div><h2>Iniciar sesión</h2><p class="ayuda">Bienvenido a tu banca en línea.</p></div>' +
-        (estado.clientes.length
-          ? '<form class="formulario" data-form="entrar-estudiante">' +
-            campo('Usuario', '<input name="usuario" list="lista-usuarios" autocomplete="off" required placeholder="Tu nombre o número de cuenta" />', 'usuario') +
-            '<datalist id="lista-usuarios">' + nombres + '</datalist>' +
-            campo('Clave', '<input class="pin" name="pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off" required placeholder="••••" />', 'llave') +
-            '<button class="boton">Iniciar sesión</button></form>'
-          : '<div class="aviso-banner azul">' + I('info') + '<span>Aún no hay cuentas abiertas. Tu docente debe abrir tu cuenta desde el acceso docente.</span></div>') +
-        '<div class="acceso-pie"><div>Nunca compartas tu clave con nadie.</div>' +
-        '<button class="enlace" data-accion="acceso-docente">Soy docente</button>' +
-        '<div>Dinero didáctico, sin valor real · Mes ' + estado.mes + '</div></div>';
+  /** Logo propio de C4pital: una "C" con dos ondas (celeste y naranja) y el nombre del banco. */
+  function logoC4(lema) {
+    return (
+      '<span class="logo-c4" aria-label="' + esc(estado.config.nombreBanco) + '">' +
+      '<svg viewBox="0 0 64 56" aria-hidden="true"><path d="M44 12.5A20 20 0 1 0 44 41" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/>' +
+      '<path d="M37 15L26 32h16M37 15v24" fill="none" stroke="#f7941d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="M2 40c14 8 34 9 52 2" fill="none" stroke="#12a7e8" stroke-width="4.5" stroke-linecap="round"/>' +
+      '<path d="M8 47c12 6 30 6 44 0" fill="none" stroke="#f7941d" stroke-width="4.5" stroke-linecap="round"/></svg>' +
+      '<span class="logo-texto"><strong>' + esc(estado.config.nombreBanco.toUpperCase()) + '</strong>' + (lema ? '<small>' + esc(lema) + '</small>' : '') + '</span></span>'
+    );
+  }
+
+  function tecladoVirtual() {
+    const digitos = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    for (let i = digitos.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [digitos[i], digitos[j]] = [digitos[j], digitos[i]];
     }
     return (
-      '<div class="movil"><div class="acceso">' +
-      '<div class="acceso-cabecera"><span class="marca-logo grande">C4</span><h1>' + esc(estado.config.nombreBanco) + '</h1>' +
-      '<p class="lema">¡Multiplica tus ideas!</p><p>Banco escolar de 4.º A</p></div>' +
-      '<div class="acceso-tarjeta">' + tarjeta + '</div></div></div>'
+      '<div class="teclado" role="group" aria-label="Teclado virtual">' +
+      digitos.map((d) => '<button type="button" data-accion="tecla" data-valor="' + d + '">' + d + '</button>').join('') +
+      '<button type="button" class="tecla-borrar" data-accion="tecla" data-valor="borrar" aria-label="Borrar">⌫</button></div>' +
+      '<p class="ayuda">Los números cambian de lugar cada vez para que nadie adivine tu clave mirando dónde tocas.</p>'
+    );
+  }
+
+  function vistaAcceso() {
+    const docente = ui.accesoDocente;
+    const linea = (icono, control) => '<label class="ingreso-campo">' + I(icono) + '<span class="ingreso-control">' + control + '</span></label>';
+    const pin = (nombre, texto) => '<input class="pin" name="' + nombre + '" type="password" inputmode="numeric" maxlength="4" autocomplete="off" required placeholder="' + texto + '" />';
+    let formulario;
+    if (docente) {
+      formulario =
+        '<h1>Acceso docente</h1><p class="ayuda">Administra las cuentas, aprueba préstamos y cierra el mes.</p>' +
+        '<form class="ingreso-form" data-form="entrar-docente">' +
+        linea('llave', pin('pin', 'Ingrese la clave de docente')) +
+        '<div class="ingreso-fila"><span></span><button class="boton ingreso-boton">Ingresar</button></div></form>' +
+        (estado.config.pinDocente === B.CONFIG_INICIAL.pinDocente ? '<div class="aviso-banner azul">' + I('info') + '<span>La clave inicial es <strong>1234</strong>. Cámbiala en Ajustes.</span></div>' : '') +
+        '<div class="ingreso-enlaces"><button class="enlace" data-accion="acceso-estudiante">Volver al acceso de estudiantes</button></div>';
+    } else if (!estado.clientes.length) {
+      formulario =
+        '<h1>Bienvenido a ' + esc(estado.config.nombreBanco) + '</h1>' +
+        '<div class="aviso-banner azul">' + I('info') + '<span>Aún no hay cuentas abiertas. Tu docente debe abrirlas desde el acceso docente.</span></div>' +
+        '<div class="ingreso-enlaces"><button class="enlace" data-accion="acceso-docente">Entrar como docente</button></div>';
+    } else {
+      const nombres = estado.clientes.map((c) => '<option value="' + esc(c.nombre) + '">' + esc(c.numero) + '</option>').join('');
+      formulario =
+        '<h1>Bienvenido a ' + esc(estado.config.nombreBanco) + '</h1>' +
+        '<form class="ingreso-form" data-form="entrar-estudiante">' +
+        linea('usuario', '<input name="usuario" list="lista-usuarios" autocomplete="off" required placeholder="Ingrese su usuario" title="Tu nombre o tu número de cuenta" />') +
+        '<datalist id="lista-usuarios">' + nombres + '</datalist>' +
+        linea('llave', pin('pin', 'Ingrese su clave')) +
+        '<div class="ingreso-fila"><button type="button" class="enlace chico" data-accion="teclado">' + (ui.teclado ? 'Ocultar teclado virtual' : 'Teclado virtual') + '</button></div>' +
+        (ui.teclado ? tecladoVirtual() : '') +
+        '<div class="ingreso-fila"><span></span><button class="boton ingreso-boton">Ingresar</button></div></form>' +
+        '<div class="ingreso-enlaces">' +
+        '<button class="enlace" data-accion="acceso-docente">Cambiar a acceso docente</button>' +
+        '<span class="tenue">¿Olvidaste tu clave? Pídesela a tu docente.</span>' +
+        '<span>¿No tienes usuario? <strong>Tu docente abre tu cuenta.</strong></span></div>';
+    }
+    return (
+      '<div class="ingreso">' +
+      '<header class="ingreso-banda"><div class="ingreso-arriba"><span>Banco escolar de 4.º A</span><span class="separador"></span><span>Español</span></div>' + logoC4() + '</header>' +
+      '<div class="ingreso-tarjeta"><section class="ingreso-izq">' + formulario + '</section>' +
+      '<aside class="ingreso-promo"><h2><span class="azul">' + esc(estado.config.nombreBanco) + '</span><span><em>multiplica</em> <b>tus ideas</b></span></h2>' +
+      '<div class="promo-imagen"><div class="promo-laptop"><div class="promo-pantalla">' +
+      '<div class="pp-barra"></div><div class="pp-cuerpo"><div class="pp-menu"><i></i><i></i><i></i><i></i><i></i></div>' +
+      '<div class="pp-datos"><div class="pp-bloques"><b></b><b></b><b></b></div><div class="pp-grafica"><i style="height:40%"></i><i style="height:65%"></i><i style="height:50%"></i><i style="height:85%"></i><i style="height:70%"></i><i style="height:95%"></i></div></div></div>' +
+      '</div><div class="promo-base"></div></div>' +
+      '<p><strong>Practica Matemática Financiera</strong> con tu propia cuenta, tarjeta de crédito, préstamos y certificados <strong>en tu banco escolar.</strong></p></div>' +
+      '<div class="puntos-carrusel"><span class="activo"></span><span></span><span></span></div></aside></div>' +
+      '<footer class="ingreso-sello"><span>' + I('escudo') + '<b>DINERO DIDÁCTICO</b><small>Sin valor real · Mes ' + estado.mes + '</small></span></footer>' +
+      '</div>'
     );
   }
 
@@ -384,6 +455,7 @@
       cerrarSesion();
       return vistaAcceso();
     }
+    if (esWeb()) return vistaEstudianteWeb(c);
     let cuerpo;
     let nav = true;
     if (ui.op) {
@@ -1139,6 +1211,236 @@
   }
 
   // ==========================================================
+  // Estudiante: banca en línea (pantallas anchas)
+  // ==========================================================
+
+  const ANCHO_WEB = window.matchMedia('(min-width: 1000px)');
+  let ultimoAncho = ANCHO_WEB.matches;
+  ANCHO_WEB.addEventListener('change', () => {
+    if (ANCHO_WEB.matches === ultimoAncho) return;
+    ultimoAncho = ANCHO_WEB.matches;
+    pintar();
+  });
+
+  function esWeb() {
+    return ui.modo === 'estudiante' && ANCHO_WEB.matches;
+  }
+
+  /** Menú lateral: [id, icono, título, [[accion, valor, texto, pantallaActiva]]]. */
+  function menuWeb(c) {
+    return [
+      ['consultas', 'lista', 'Consultas', [
+        ['producto', 'corriente', 'Cuentas', 'p:corriente'],
+        ['producto', 'ahorro', 'Cuenta de ahorro', 'p:ahorro'],
+        ['ir', 'movimientos', 'Estado de cuenta', 'movimientos'],
+        ['producto', 'tarjeta', 'Tarjetas de crédito', 'p:tarjeta'],
+        ['ir', 'prestamos', 'Préstamos', 'prestamos'],
+        ['ir', 'certificados', 'Certificados', 'certificados'],
+        ['producto', 'dolares', 'Cuenta en dólares', 'p:dolares'],
+      ]],
+      ['transferencias', 'transferir', 'Transferencias', [
+        ['operar', 'transferencia', 'A otra persona', 'o:transferencia'],
+        ['operar', 'mover', 'Entre mis cuentas', 'o:mover'],
+        ['operar', 'deposito', 'Depositar', 'o:deposito'],
+        ['operar', 'retiro', 'Retirar', 'o:retiro'],
+      ]],
+      ['pagos', 'pagos', 'Pagos', [
+        ['operar', 'servicio', 'Servicios', 'o:servicio'],
+        ['operar', 'pago-tarjeta', 'Pago de tarjeta', 'o:pago-tarjeta'],
+        ['operar', 'cuota', 'Cuota de préstamo', 'o:cuota'],
+      ]],
+      ['solicitudes', 'mas1', 'Solicitudes', [
+        ['operar', 'solicitud', 'Préstamo', 'o:solicitud'],
+        c.tarjeta ? ['operar', 'compra', 'Compra con tarjeta', 'o:compra'] : ['operar', 'activar-tarjeta', 'Tarjeta de crédito', 'o:activar-tarjeta'],
+        ['operar', 'certificado', 'Certificado', 'o:certificado'],
+      ]],
+      ['divisas', 'globo', 'Divisas', [
+        ['ir', 'divisas', 'Tasas del dólar', 'divisas'],
+        ['operar', 'divisas', 'Comprar dólares', 'o:divisas'],
+        ['operar', 'divisas-vender', 'Vender dólares', 'o:divisas-vender'],
+      ]],
+      ['herramientas', 'calculadora', 'Herramientas', [
+        ['ir', 'calculadoras', 'Calculadoras', 'calculadoras'],
+        ['ir', 'tarifario', 'Tarifario', 'tarifario'],
+        ['ir', 'mas', 'Aprende finanzas', 'mas'],
+        ['operar', 'clave', 'Cambiar clave', 'o:clave'],
+      ]],
+    ];
+  }
+
+  function claveActiva() {
+    if (ui.op) return 'o:' + (ui.op.tipo === 'divisas' && ui.op.inicial === 'vender' ? 'divisas-vender' : ui.op.tipo);
+    if (ui.pantalla === 'producto') return 'p:' + ui.producto;
+    return ui.pantalla;
+  }
+
+  function avisosCliente(c) {
+    const r = resumenCliente(c);
+    const rt = B.resumenTarjeta(c);
+    const alertas = [];
+    if (r.atrasadas) alertas.push(r.atrasadas + ' cuota(s) de préstamo atrasada(s)');
+    if (rt && rt.minimoPendiente > 0) alertas.push('Pago mínimo de tarjeta pendiente: ' + dinero(rt.minimoPendiente));
+    if (estado.config.cargoMantenimiento > 0 && c.saldos.corriente < estado.config.saldoMinimo) alertas.push('Saldo por debajo del mínimo');
+    const mensajes = c.movimientos.filter((m) => m.mes === estado.mes && m.monto > 0 && ['transferencia', 'prestamo', 'interes', 'certificado'].includes(m.tipo)).length + (r.solicitud ? 1 : 0);
+    return { alertas, mensajes };
+  }
+
+  function vistaEstudianteWeb(c) {
+    const activa = claveActiva();
+    const grupos = menuWeb(c);
+    const abierto = ui.menuAbierto || (grupos.find((g) => g[3].some((i) => i[3] === activa)) || grupos[0])[0];
+    const av = avisosCliente(c);
+    const cfg = estado.config;
+    const ultimo = ultimoAcceso(c.numero);
+
+    const menu =
+      '<nav class="web-menu" aria-label="Menú de la banca">' +
+      '<button class="web-menu-principal" data-accion="ir" data-valor="inicio"' + (activa === 'inicio' && !ui.op ? ' aria-current="page"' : '') + '>' + I('inicio') + 'Principal</button>' +
+      grupos
+        .map(([id, ico, titulo, items]) => {
+          const abre = abierto === id;
+          return (
+            '<div class="web-grupo' + (abre ? ' abierto' : '') + '"><button class="web-grupo-titulo" data-accion="menu" data-valor="' + id + '" aria-expanded="' + abre + '">' + I('flecha') + titulo + '</button>' +
+            (abre ? '<div class="web-grupo-items">' + items.map(([a, v, t, k]) => '<button data-accion="' + a + '" data-valor="' + v + '"' + (k === activa ? ' aria-current="page"' : '') + '>' + esc(t) + '</button>').join('') + '</div>' : '') +
+            '</div>'
+          );
+        })
+        .join('') +
+      '<button class="web-grupo-titulo salir" data-accion="salir">' + I('salir') + (ui.desdeDocente ? 'Volver al panel docente' : 'Cerrar sesión') + '</button>' +
+      '</nav>';
+
+    const cabeza =
+      '<header class="web-cabeza"><div class="web-logo">' + logoC4('El banco escolar de 4.º A') + '</div>' +
+      '<div class="web-cliente"><h1>' + esc(c.nombre) + '</h1><p>Último acceso: ' + esc(ultimo ? fechaLarga(ultimo) : 'hoy es tu primera vez') + ' · Cuenta ' + esc(c.numero) + ' · Mes ' + estado.mes + '</p>' +
+      '<div class="web-avisos"><button data-accion="ir" data-valor="movimientos">' + I('copiar') + av.mensajes + ' - Mensajes</button>' +
+      '<button data-accion="ver-alertas" title="' + esc(av.alertas.join(' · ') || 'Sin alertas') + '">' + I('campana') + av.alertas.length + ' - Alertas</button></div></div>' +
+      '<div class="web-marca"><small>C4pital en línea</small><strong>Personas</strong></div></header>';
+
+    const tasa =
+      '<div class="web-tasa"><span class="web-tasa-etiqueta">Tasa de cambio</span><span class="web-tasa-valor"><b>USD</b> Venta ' + cfg.tasaVentaUSD.toFixed(2) + ' &nbsp;Compra ' + cfg.tasaCompraUSD.toFixed(2) + '</span>' +
+      '<span class="web-tasa-acciones"><button data-accion="ir" data-valor="tarifario">' + I('subir') + 'Mis límites</button><button data-accion="ir" data-valor="productos">' + I('dinero') + 'Productos</button>' +
+      '<button class="solo-icono" data-accion="imprimir" aria-label="Imprimir">' + I('imprimir') + '</button></span></div>';
+
+    let cuerpo;
+    if (ui.op) cuerpo = '<div class="web-panel angosto">' + pantallaOperacion(c) + '</div>';
+    else if (ui.pantalla === 'inicio') cuerpo = pPrincipalWeb(c);
+    else {
+      const pantallas = { movimientos: pMovimientos, producto: pProducto, pagos: pPagos, productos: pProductos, prestamos: pPrestamos, certificados: pCertificados, divisas: pDivisas, calculadoras: pCalculadoras, tarifario: pTarifario, mas: pMas };
+      cuerpo = '<div class="web-panel">' + (pantallas[ui.pantalla] || pPrincipalWeb)(c) + '</div>';
+    }
+
+    return '<div class="web">' + cabeza + '<div class="web-cuerpo">' + menu + '<main class="web-principal">' + tasa + '<div class="web-contenido">' + cuerpo + '</div></main></div></div>';
+  }
+
+  /** Puntos de la tarjeta: 1 punto por cada 10 de compras. */
+  function puntosTarjeta(c) {
+    const compras = c.movimientos.filter((m) => m.tipo === 'compra');
+    const pts = (lista) => Math.floor(lista.reduce((s, m) => s - m.monto, 0) / 1000);
+    return { ganados: pts(compras.filter((m) => m.mes === estado.mes)), acumulados: pts(compras) };
+  }
+
+  function bloqueWeb(icono, titulo, lineas, accion, valor) {
+    const etiqueta = accion ? 'button data-accion="' + accion + '" data-valor="' + valor + '"' : 'div';
+    return '<' + etiqueta + ' class="web-bloque"><span class="web-bloque-icono">' + I(icono) + '</span><span><strong>' + titulo + '</strong>' + lineas.filter(Boolean).map((l) => '<small>' + l + '</small>').join('') + '</span></' + etiqueta.split(' ')[0] + '>';
+  }
+
+  function seccionWeb(titulo, subtitulo, bloques, detalle, textoDetalle) {
+    return (
+      '<section class="web-seccion"><h2>' + titulo + '</h2><p>' + subtitulo + '</p><div class="web-bloques">' + bloques.join('') + '</div>' +
+      (detalle ? '<details class="web-detalle"><summary>' + (textoDetalle || 'Mostrar cuentas') + I('flecha') + '</summary>' + detalle + '</details>' : '') +
+      '</section>'
+    );
+  }
+
+  function tablaWeb(cabeceras, filas) {
+    return (
+      '<div class="tabla-envoltura"><table><thead><tr>' + cabeceras.map((h, i) => '<th' + (i && i >= cabeceras.length - 2 ? ' class="num"' : '') + '>' + h + '</th>').join('') + '</tr></thead><tbody>' +
+      filas.map((f) => '<tr>' + f.map((v, i) => '<td' + (i && i >= f.length - 2 ? ' class="num"' : '') + '>' + v + '</td>').join('') + '</tr>').join('') +
+      '</tbody></table></div>'
+    );
+  }
+
+  function pPrincipalWeb(c) {
+    const cfg = estado.config;
+    const oc = (v) => (ui.ocultar ? '• • • •' : esc(v));
+    const verMas = (accion, valor) => '<button class="enlace" data-accion="' + accion + '" data-valor="' + valor + '">Ver detalle</button>';
+    const ganado = c.movimientos.filter((m) => m.tipo === 'interes' && m.cuenta === 'ahorro').reduce((s, m) => s + m.monto, 0);
+    let html =
+      '<div class="web-saludo"><div><h2>' + saludoHora() + ', ' + esc(primerNombre(c.nombre)) + '</h2><p>Este es el resumen de todos tus productos.</p></div>' +
+      '<button class="boton chico claro" data-accion="ocultar">' + I(ui.ocultar ? 'ojo' : 'ojoCerrado') + (ui.ocultar ? 'Mostrar saldos' : 'Ocultar saldos') + '</button></div>';
+
+    html += seccionWeb(
+      'Cuentas',
+      'Balance total disponible Cuentas Ahorros y Corrientes',
+      [
+        bloqueWeb('dinero', 'Disponible', [oc(dinero(c.saldos.corriente + c.saldos.ahorro))], 'producto', 'corriente'),
+        bloqueWeb('check', 'Corriente', [oc(dinero(c.saldos.corriente))], 'producto', 'corriente'),
+        bloqueWeb('alcancia', 'Ahorro', [oc(dinero(c.saldos.ahorro)), 'Intereses ganados ' + oc(dinero(ganado))], 'producto', 'ahorro'),
+      ],
+      tablaWeb(['Producto', 'Número', 'Estado', 'Disponible', ''], [
+        ['Cuenta Corriente', esc(c.numero), '<span class="etiqueta verde">Activa</span>', oc(dinero(c.saldos.corriente)), verMas('producto', 'corriente')],
+        ['Cuenta de Ahorro', esc(c.numero) + '-A', '<span class="etiqueta verde">' + cfg.tasaAhorroMensual + '% mensual</span>', oc(dinero(c.saldos.ahorro)), verMas('producto', 'ahorro')],
+        ['Cuenta en Dólares', esc(c.numero) + '-D', '<span class="etiqueta">Divisas</span>', oc(usd(c.saldos.dolares)), verMas('producto', 'dolares')],
+      ])
+    );
+
+    const rt = B.resumenTarjeta(c);
+    if (rt) {
+      const p = puntosTarjeta(c);
+      html += seccionWeb(
+        'Tarjetas de Crédito',
+        'Balance total disponible para consumo',
+        [
+          bloqueWeb('dinero', 'Disponible', [oc(dinero(rt.disponible))], 'producto', 'tarjeta'),
+          bloqueWeb('dinero', 'Balance Actual', [oc(dinero(rt.deuda))], 'producto', 'tarjeta'),
+          bloqueWeb('dinero', 'Balance al Corte', [rt.saldoCorte ? oc(dinero(rt.saldoCorte)) : '-', rt.pagoMinimo ? 'Pago mínimo ' + oc(dinero(rt.pagoMinimo)) : ''], 'producto', 'tarjeta'),
+          bloqueWeb('estrella', 'Puntos', ['Ganados ' + p.ganados, 'Acumulados ' + p.acumulados]),
+        ],
+        tablaWeb(['Tarjeta', 'Límite', 'Tasa', 'Balance actual', ''], [['•••• ' + esc(c.tarjeta.numero.slice(-4)), esc(dinero(rt.limite)), c.tarjeta.tasa + '% mensual', oc(dinero(rt.deuda)), verMas('producto', 'tarjeta')]]),
+        'Mostrar tarjetas'
+      );
+    } else {
+      html += seccionWeb('Tarjetas de Crédito', 'Todavía no tienes tarjeta de crédito', [
+        bloqueWeb('tarjeta', 'Solicítala aquí', ['Límite de ' + esc(dinero(cfg.limiteTarjeta)) + ' · ' + cfg.tasaTarjetaMensual + '% mensual'], 'operar', 'activar-tarjeta'),
+      ]);
+    }
+
+    const activos = B.prestamosActivos(c);
+    if (activos.length) {
+      const p = activos[0];
+      const r = B.resumenPrestamo(p);
+      html += seccionWeb(
+        'Préstamos',
+        'Balance pendiente de tus préstamos',
+        [
+          bloqueWeb('prestamo', 'Balance pendiente', [oc(dinero(r.saldoPendiente))], 'producto', p.id),
+          bloqueWeb('calendario', 'Próximo pago', [oc(dinero(r.proximoPago)), r.cuotasAtrasadas ? '<span class="negativo">' + r.cuotasAtrasadas + ' atrasada(s)</span>' : 'Al día'], 'operar', 'cuota'),
+          bloqueWeb('check', 'Cuotas pagadas', [p.cuotasPagadas + ' de ' + p.plazo], 'producto', p.id),
+        ],
+        tablaWeb(['Préstamo', 'Sistema', 'Tasa', 'Monto', ''], [[esc(nombreTipo(p.tipo)), esc(B.SISTEMAS[p.sistema || 'frances']), p.tasa + '% mensual', esc(dinero(p.monto)), verMas('producto', p.id)]]),
+        'Mostrar préstamos'
+      );
+    }
+
+    const certs = B.certificadosActivos(c);
+    if (certs.length || c.saldos.dolares) {
+      html += seccionWeb(
+        'Inversiones',
+        'Certificados de depósito y dólares',
+        [
+          bloqueWeb('escudo', 'Certificados', [oc(dinero(certs.reduce((s, x) => s + x.capital, 0))), certs.length + ' activo(s)'], 'ir', 'certificados'),
+          bloqueWeb('porcentaje', 'Intereses acumulados', [oc(dinero(certs.reduce((s, x) => s + x.interes, 0)))], 'ir', 'certificados'),
+          bloqueWeb('dolar', 'Dólares', [oc(usd(c.saldos.dolares)), '≈ ' + oc(dinero(Math.round(c.saldos.dolares * cfg.tasaCompraUSD)))], 'producto', 'dolares'),
+        ]
+      );
+    }
+
+    html += '<section class="web-seccion"><h2>Últimos movimientos</h2><p>Lo más reciente de todas tus cuentas</p><div class="panel">' + listaMovimientos(c.movimientos.slice(0, 6)) + '</div>' +
+      (c.movimientos.length > 6 ? '<button class="enlace" style="margin-top:12px" data-accion="ir" data-valor="movimientos">Ver estado de cuenta completo</button>' : '') + '</section>';
+    return html;
+  }
+
+  // ==========================================================
   // Estudiante: operaciones paso a paso
   // ==========================================================
 
@@ -1839,6 +2141,7 @@
       inicial = 'vender';
     }
     ui.op = { tipo, paso: 'datos', datos: {}, inicial, volver: ui.pantalla };
+    ui.menuAbierto = null;
     pintar(true);
   }
 
@@ -2136,7 +2439,9 @@
   // ==========================================================
 
   function pintar(subir) {
-    document.body.classList.toggle('modo-movil', ui.modo !== 'docente');
+    document.body.classList.toggle('modo-movil', ui.modo === 'estudiante' && !esWeb());
+    document.body.classList.toggle('modo-web', esWeb());
+    document.body.classList.toggle('modo-ingreso', ui.modo === 'acceso');
     if (ui.modo === 'estudiante') app.innerHTML = vistaEstudiante();
     else if (ui.modo === 'docente') app.innerHTML = vistaDocente();
     else app.innerHTML = vistaAcceso();
@@ -2153,6 +2458,7 @@
     else if (pantalla !== ui.pantalla) ui.pila.push(ui.pantalla);
     ui.pantalla = pantalla;
     ui.op = null;
+    ui.menuAbierto = null;
     pintar(true);
   }
 
@@ -2196,7 +2502,8 @@
       const texto = String(d.usuario || '').trim().toLowerCase();
       const c = estado.clientes.find((x) => x.numero.toLowerCase() === texto || x.nombre.toLowerCase() === texto);
       if (!c || c.pin !== String(d.pin).trim()) return avisar('Usuario o clave incorrectos.', true);
-      Object.assign(ui, { modo: 'estudiante', numero: c.numero, pantalla: 'inicio', op: null, desdeDocente: false });
+      Object.assign(ui, { modo: 'estudiante', numero: c.numero, pantalla: 'inicio', op: null, desdeDocente: false, teclado: false, menuAbierto: null });
+      registrarAcceso(c.numero);
       guardarSesion();
       pintar(true);
       avisar('¡Hola, ' + c.nombre.split(/\s+/)[0] + '!');
@@ -2308,6 +2615,33 @@
     'acceso-docente'() {
       ui.accesoDocente = true;
       pintar();
+    },
+    teclado() {
+      const form = document.querySelector('form[data-form=entrar-estudiante]');
+      const usuario = form ? form.usuario.value : '';
+      const pin = form ? form.pin.value : '';
+      ui.teclado = !ui.teclado;
+      pintar();
+      const nuevo = document.querySelector('form[data-form=entrar-estudiante]');
+      if (nuevo) {
+        nuevo.usuario.value = usuario;
+        nuevo.pin.value = pin;
+      }
+    },
+    tecla(v, el) {
+      const input = el.closest('form').querySelector('input[name=pin]');
+      if (v === 'borrar') input.value = input.value.slice(0, -1);
+      else if (input.value.length < 4) input.value += v;
+    },
+    menu(v) {
+      const actual = document.querySelector('.web-grupo.abierto [data-accion=menu]');
+      ui.menuAbierto = actual && actual.dataset.valor === v ? 'ninguno' : v;
+      pintar();
+    },
+    'ver-alertas'() {
+      const c = clienteActual();
+      const a = avisosCliente(c).alertas;
+      hoja({ icono: a.length ? 'alerta' : 'check', titulo: a.length ? 'Tienes ' + a.length + ' alerta(s)' : 'Sin alertas', texto: a.length ? a.join('. ') + '.' : 'Todas tus cuentas están al día.', ok: 'Entendido', soloOk: true });
     },
     'acceso-estudiante'() {
       ui.accesoDocente = false;
