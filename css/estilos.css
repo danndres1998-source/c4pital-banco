@@ -1911,3 +1911,144 @@ tr.pagada td {
     transition: none !important;
   }
 }
+
+/* ---------- Departamentos: tarjeta, certificados, dólares ---------- */
+
+.producto.credito {
+  background: linear-gradient(135deg, #2b2f3a, #0d0f14);
+}
+
+.producto.credito .producto-tipo {
+  color: #ffd766;
+}
+
+.producto.certificado {
+  background: linear-gradient(135deg, #18a560, #08623a);
+}
+
+.producto.dolares {
+  background: linear-gradient(135deg, #1f8fd1, #0b4f86);
+}
+
+.barra-superior.credito {
+  background: #1a1d24;
+}
+
+.barra-superior.dolares {
+  background: #136ba8;
+}
+
+.barra-superior.certificado {
+  background: #0f8a50;
+}
+
+.detalle-cabeza.credito {
+  background: linear-gradient(160deg, #2b2f3a, #0d0f14);
+}
+
+.detalle-cabeza.credito .progreso span {
+  background: linear-gradient(90deg, #ffd766, var(--oro));
+}
+
+.detalle-cabeza.dolares {
+  background: linear-gradient(160deg, #1f8fd1, #0a3f6b);
+}
+
+.detalle-cabeza.certificado {
+  background: linear-gradient(160deg, #18a560, #064a2c);
+}
+
+.plastico {
+  position: relative;
+  max-width: 360px;
+  margin: 0 auto;
+  aspect-ratio: 1.586;
+  padding: 20px;
+  border-radius: 20px;
+  color: #fff;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(circle at 85% 15%, rgba(255, 215, 102, 0.35), transparent 45%), linear-gradient(135deg, #2b2f3a, #0d0f14);
+  box-shadow: 0 16px 36px rgba(7, 12, 24, 0.35);
+}
+
+.plastico .producto-chip {
+  margin-left: 0;
+  width: 44px;
+  height: 32px;
+}
+
+.plastico-fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.plastico-fila:last-child {
+  margin-top: auto;
+}
+
+.plastico .marca {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.plastico-numero {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+.chips-desplazables {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.chips-desplazables::-webkit-scrollbar {
+  display: none;
+}
+
+.chips-desplazables button {
+  flex: 0 0 auto;
+  border: 1px solid var(--borde);
+  background: var(--superficie);
+  color: var(--suave);
+  border-radius: 999px;
+  padding: 9px 16px;
+  font-weight: 700;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.chips-desplazables button[aria-pressed='true'] {
+  background: var(--azul-800);
+  border-color: var(--azul-800);
+  color: #fff;
+}
+
+.casilla {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.9rem;
+  color: var(--suave);
+  cursor: pointer;
+}
+
+.casilla input {
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  accent-color: var(--azul-800);
+  flex: none;
+}
+
