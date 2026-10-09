@@ -163,6 +163,18 @@
     return cliente.saldos.corriente;
   }
 
+  /** Pago de un servicio simulado (luz, agua, cantina…): sale de la cuenta corriente. */
+  function pagarServicio(estado, numero, centavos, servicio, referencia) {
+    const cliente = buscarCliente(estado, numero);
+    montoPositivo(centavos);
+    servicio = String(servicio || '').trim();
+    if (!servicio) falla('Elige el servicio que vas a pagar.');
+    if (centavos > cliente.saldos.corriente) falla('Saldo insuficiente para pagar ese servicio.');
+    const ref = String(referencia || '').trim();
+    registrar(estado, cliente, 'corriente', -centavos, 'pago', 'Pago de ' + servicio + (ref ? ' · Contrato ' + ref : ''));
+    return cliente.saldos.corriente;
+  }
+
   function transferir(estado, origen, destino, centavos, concepto) {
     const de = buscarCliente(estado, origen);
     const para = buscarCliente(estado, destino);
@@ -421,6 +433,7 @@
     depositar,
     retirar,
     transferir,
+    pagarServicio,
     guardarEnAhorro,
     sacarDeAhorro,
     proyeccionAhorro,

@@ -164,3 +164,13 @@ test('totales del banco', () => {
   assert.equal(t.ahorro, 40000);
   assert.equal(t.clientes, 2);
 });
+
+test('pago de servicios', () => {
+  const { e, ana } = bancoConDos();
+  B.pagarServicio(e, ana.numero, 15000, 'Luz', '123');
+  assert.equal(ana.saldos.corriente, 85000);
+  assert.equal(ana.movimientos[0].tipo, 'pago');
+  assert.match(ana.movimientos[0].descripcion, /Luz.*123/);
+  assert.throws(() => B.pagarServicio(e, ana.numero, 999999, 'Agua'), /insuficiente/);
+  assert.throws(() => B.pagarServicio(e, ana.numero, 100, ''), /servicio/);
+});
