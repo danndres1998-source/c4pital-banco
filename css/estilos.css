@@ -2073,10 +2073,42 @@ tr.pagada td {
   color: #fff;
 }
 
-.logo-c4 svg {
-  width: 62px;
+.logo-insignia {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 54px;
   height: 54px;
   flex: none;
+  border-radius: 16px;
+  background: linear-gradient(140deg, #ffffff, #e6f5fd);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.logo-insignia span {
+  font-size: 1.45rem;
+  font-weight: 900;
+  letter-spacing: -0.06em;
+  color: var(--web-azul);
+  line-height: 1;
+  margin-top: -4px;
+}
+
+.logo-insignia b {
+  color: var(--web-naranja);
+  font-weight: 900;
+}
+
+.logo-insignia::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 9px;
+  height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--web-celeste) 50%, var(--web-naranja) 50%);
 }
 
 .logo-texto {
@@ -2085,9 +2117,13 @@ tr.pagada td {
 }
 
 .logo-texto strong {
-  font-size: 1.75rem;
-  font-weight: 900;
-  letter-spacing: 0.01em;
+  font-size: 1.85rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.logo-cuatro {
+  color: var(--web-naranja);
 }
 
 .logo-texto small {
@@ -2117,6 +2153,7 @@ body.modo-ingreso {
 
 .ingreso-arriba {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
   gap: 16px;
@@ -2462,6 +2499,10 @@ body.modo-ingreso {
   .ingreso-banda {
     height: 220px;
     padding: 18px 16px 0;
+  }
+  .ingreso-arriba {
+    justify-content: center;
+    font-size: 0.85rem;
   }
   .ingreso-tarjeta {
     grid-template-columns: 1fr;
@@ -2910,4 +2951,158 @@ button.web-bloque:hover {
 .web .pasos {
   padding-left: 0;
   padding-right: 0;
+}
+
+/* ---------- Panel docente con el estilo de la banca en línea ---------- */
+
+.web-grupo-items .contador {
+  margin-left: auto;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--web-naranja);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.web-grupo-items button[aria-current='page'] .contador {
+  background: #fff;
+  color: var(--web-naranja);
+}
+
+.web-docente .web-menu > .web-grupo-titulo .ico {
+  width: 22px;
+  height: 22px;
+}
+
+.web-docente .escritorio-cabeza h1 {
+  color: var(--web-celeste);
+  font-size: 2rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.web-docente .escritorio-cabeza p {
+  color: #555;
+  font-size: 1.02rem;
+}
+
+.web-docente .escritorio-cabeza .boton {
+  background: var(--web-celeste);
+  box-shadow: none;
+}
+
+.web-docente .kpi,
+.web-docente .tarjeta {
+  box-shadow: none;
+  border: 1px solid #e3e6ea;
+  border-radius: 10px;
+}
+
+.web-docente .kpi .item-icono {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 3px solid var(--web-celeste);
+  background: #fff;
+  color: var(--web-naranja);
+}
+
+.web-docente .kpi strong {
+  color: var(--web-celeste);
+  font-weight: 500;
+  font-size: 1.45rem;
+}
+
+.web-docente .tarjeta-cabeza {
+  background: #f7f8fa;
+}
+
+.web-docente .tarjeta-cabeza h2 {
+  color: var(--web-azul-oscuro);
+}
+
+/* La banca en línea en pantallas medianas (panel docente en tableta o celular). */
+@media (max-width: 999px) {
+  .web-cabeza {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  .web-cabeza::before,
+  .web-cabeza::after,
+  .web-marca {
+    display: none;
+  }
+  .web-logo {
+    padding: 18px 16px 0;
+  }
+  .web-cliente {
+    padding: 12px 16px 18px;
+  }
+  .web-cliente h1 {
+    font-size: 1.5rem;
+  }
+  .web-avisos {
+    margin-top: 12px;
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .web-cuerpo {
+    grid-template-columns: 1fr;
+  }
+  .web-menu {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+  }
+  .web-menu > button,
+  .web-menu .web-grupo {
+    flex: 0 0 auto;
+    width: auto;
+  }
+  .web-menu .web-grupo {
+    display: flex;
+  }
+  .web-menu .web-grupo-items {
+    display: flex;
+  }
+  .web-menu button {
+    padding: 12px 16px;
+    font-size: 0.92rem;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .web-grupo-items button {
+    padding: 12px 16px;
+  }
+  .web-grupo-titulo.salir {
+    margin-top: 0;
+  }
+  .web-tasa {
+    flex-wrap: wrap;
+  }
+  .web-tasa-etiqueta {
+    padding: 10px 14px;
+    font-size: 0.95rem;
+  }
+  .web-tasa-valor {
+    padding: 10px 14px;
+    font-size: 0.95rem;
+  }
+  .web-tasa-acciones {
+    margin-left: 0;
+    width: 100%;
+  }
+  .web-tasa-acciones button {
+    flex: 1;
+    justify-content: center;
+    padding: 12px;
+  }
+  .web-contenido {
+    padding: 18px 14px 40px;
+  }
 }

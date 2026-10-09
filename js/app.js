@@ -369,15 +369,14 @@
   // Acceso
   // ==========================================================
 
-  /** Logo propio de C4pital: una "C" con dos ondas (celeste y naranja) y el nombre del banco. */
+  /** Logo propio de C4pital: insignia con "C4" y una línea naranja, más el nombre del banco. */
   function logoC4(lema) {
+    const nombre = esc(estado.config.nombreBanco);
+    const marca = nombre.replace(/4/, '<span class="logo-cuatro">4</span>');
     return (
-      '<span class="logo-c4" aria-label="' + esc(estado.config.nombreBanco) + '">' +
-      '<svg viewBox="0 0 64 56" aria-hidden="true"><path d="M44 12.5A20 20 0 1 0 44 41" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/>' +
-      '<path d="M37 15L26 32h16M37 15v24" fill="none" stroke="#f7941d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>' +
-      '<path d="M2 40c14 8 34 9 52 2" fill="none" stroke="#12a7e8" stroke-width="4.5" stroke-linecap="round"/>' +
-      '<path d="M8 47c12 6 30 6 44 0" fill="none" stroke="#f7941d" stroke-width="4.5" stroke-linecap="round"/></svg>' +
-      '<span class="logo-texto"><strong>' + esc(estado.config.nombreBanco.toUpperCase()) + '</strong>' + (lema ? '<small>' + esc(lema) + '</small>' : '') + '</span></span>'
+      '<span class="logo-c4" aria-label="' + nombre + '">' +
+      '<span class="logo-insignia" aria-hidden="true"><span>C<b>4</b></span></span>' +
+      '<span class="logo-texto"><strong>' + marca + '</strong>' + (lema ? '<small>' + esc(lema) + '</small>' : '') + '</span></span>'
     );
   }
 
@@ -2151,27 +2150,51 @@
 
   function vistaDocente() {
     const pendientes = estado.solicitudes.length;
+    const t = B.totales(estado);
+    const cfg = estado.config;
+    const alertas = estado.clientes.filter((c) => {
+      const r = resumenCliente(c);
+      return r.atrasadas || r.tarjetaMora;
+    }).length;
     const secciones = [
-      ['resumen', 'grafica', 'Resumen'],
-      ['clientes', 'usuarios', 'Clientes'],
-      ['solicitudes', 'prestamo', 'Solicitudes'],
-      ['mes', 'calendario', 'Cierre de mes'],
-      ['ajustes', 'ajustes', 'Ajustes'],
+      ['clientes', 'Clientes y cuentas'],
+      ['solicitudes', 'Solicitudes de préstamo'],
+      ['mes', 'Cierre de mes'],
+      ['ajustes', 'Tarifas y ajustes'],
     ];
     const contenido = ({ resumen: dResumen, clientes: dClientes, solicitudes: dSolicitudes, mes: dMes, ajustes: dAjustes }[ui.seccion] || dResumen)();
-    return (
-      '<div class="docente"><nav class="lateral" aria-label="Panel docente">' +
-      '<div class="marca"><span class="marca-logo">C4</span><div>' + esc(estado.config.nombreBanco) + '<small>Banca administrativa</small></div></div>' +
-      secciones
-        .map(
-          ([id, ico, t]) =>
-            '<button class="lateral-enlace" data-accion="seccion" data-valor="' + id + '"' + (ui.seccion === id ? ' aria-current="page"' : '') + '>' + I(ico) + '<span class="texto">' + t + '</span>' +
-            (id === 'solicitudes' && pendientes ? '<span class="contador">' + pendientes + '</span>' : '') + '</button>'
-        )
-        .join('') +
-      '<button class="lateral-enlace" data-accion="salir">' + I('salir') + '<span class="texto">Salir</span></button>' +
-      '</nav><main class="escritorio">' + contenido + '</main></div>'
-    );
+    const abierto = ui.menuDocente !== false;
+
+    const menu =
+      '<nav class="web-menu" aria-label="Panel docente">' +
+      '<button class="web-menu-principal" data-accion="seccion" data-valor="resumen"' + (ui.seccion === 'resumen' ? ' aria-current="page"' : '') + '>' + I('inicio') + 'Resumen del banco</button>' +
+      '<div class="web-grupo' + (abierto ? ' abierto' : '') + '"><button class="web-grupo-titulo" data-accion="menu-docente" aria-expanded="' + abierto + '">' + I('flecha') + 'Administración</button>' +
+      (abierto
+        ? '<div class="web-grupo-items">' +
+          secciones
+            .map(([id, txt]) => '<button data-accion="seccion" data-valor="' + id + '"' + (ui.seccion === id ? ' aria-current="page"' : '') + '>' + txt + (id === 'solicitudes' && pendientes ? '<span class="contador">' + pendientes + '</span>' : '') + '</button>')
+            .join('') +
+          '</div>'
+        : '') +
+      '</div>' +
+      '<button class="web-grupo-titulo" data-accion="ir-apertura-docente">' + I('mas1') + 'Abrir cuentas</button>' +
+      '<button class="web-grupo-titulo" data-accion="seccion" data-valor="mes">' + I('calendario') + 'Cerrar el mes ' + estado.mes + '</button>' +
+      '<button class="web-grupo-titulo salir" data-accion="salir">' + I('salir') + 'Cerrar sesión</button>' +
+      '</nav>';
+
+    const cabeza =
+      '<header class="web-cabeza"><div class="web-logo">' + logoC4('El banco escolar de 4.º A') + '</div>' +
+      '<div class="web-cliente"><h1>Panel docente</h1><p>Mes ' + estado.mes + ' del banco · ' + t.clientes + ' cliente(s) · Ganancias del banco ' + esc(dinero(B.ingresosBanco(estado).total)) + '</p>' +
+      '<div class="web-avisos"><button data-accion="seccion" data-valor="solicitudes">' + I('prestamo') + pendientes + ' - Solicitudes</button>' +
+      '<button data-accion="seccion" data-valor="resumen">' + I('campana') + alertas + ' - Alertas</button></div></div>' +
+      '<div class="web-marca"><small>C4pital en línea</small><strong>Docente</strong></div></header>';
+
+    const tasa =
+      '<div class="web-tasa"><span class="web-tasa-etiqueta">Tasa de cambio</span><span class="web-tasa-valor"><b>USD</b> Venta ' + cfg.tasaVentaUSD.toFixed(2) + ' &nbsp;Compra ' + cfg.tasaCompraUSD.toFixed(2) + '</span>' +
+      '<span class="web-tasa-acciones"><button data-accion="seccion" data-valor="ajustes">' + I('ajustes') + 'Tarifas</button><button data-accion="seccion" data-valor="clientes">' + I('usuarios') + 'Clientes</button>' +
+      '<button class="solo-icono" data-accion="imprimir" aria-label="Imprimir">' + I('imprimir') + '</button></span></div>';
+
+    return '<div class="web web-docente">' + cabeza + '<div class="web-cuerpo">' + menu + '<main class="web-principal">' + tasa + '<div class="web-contenido escritorio">' + contenido + '</div></main></div></div>';
   }
 
   function cabezaEscritorio(titulo, subtitulo, acciones) {
@@ -2440,7 +2463,7 @@
 
   function pintar(subir) {
     document.body.classList.toggle('modo-movil', ui.modo === 'estudiante' && !esWeb());
-    document.body.classList.toggle('modo-web', esWeb());
+    document.body.classList.toggle('modo-web', esWeb() || ui.modo === 'docente');
     document.body.classList.toggle('modo-ingreso', ui.modo === 'acceso');
     if (ui.modo === 'estudiante') app.innerHTML = vistaEstudiante();
     else if (ui.modo === 'docente') app.innerHTML = vistaDocente();
@@ -2632,6 +2655,15 @@
       const input = el.closest('form').querySelector('input[name=pin]');
       if (v === 'borrar') input.value = input.value.slice(0, -1);
       else if (input.value.length < 4) input.value += v;
+    },
+    'menu-docente'() {
+      ui.menuDocente = ui.menuDocente === false;
+      pintar();
+    },
+    'ir-apertura-docente'() {
+      ui.seccion = 'clientes';
+      pintar(true);
+      acciones['ir-apertura']();
     },
     menu(v) {
       const actual = document.querySelector('.web-grupo.abierto [data-accion=menu]');
