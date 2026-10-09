@@ -369,15 +369,14 @@
   // Acceso
   // ==========================================================
 
-  /** Logo propio de C4pital: una "C" con dos ondas (celeste y naranja) y el nombre del banco. */
+  /** Logo propio de C4pital: insignia con "C4" y una línea naranja, más el nombre del banco. */
   function logoC4(lema) {
+    const nombre = esc(estado.config.nombreBanco);
+    const marca = nombre.replace(/4/, '<span class="logo-cuatro">4</span>');
     return (
-      '<span class="logo-c4" aria-label="' + esc(estado.config.nombreBanco) + '">' +
-      '<svg viewBox="0 0 64 56" aria-hidden="true"><path d="M44 12.5A20 20 0 1 0 44 41" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/>' +
-      '<path d="M37 15L26 32h16M37 15v24" fill="none" stroke="#f7941d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>' +
-      '<path d="M2 40c14 8 34 9 52 2" fill="none" stroke="#12a7e8" stroke-width="4.5" stroke-linecap="round"/>' +
-      '<path d="M8 47c12 6 30 6 44 0" fill="none" stroke="#f7941d" stroke-width="4.5" stroke-linecap="round"/></svg>' +
-      '<span class="logo-texto"><strong>' + esc(estado.config.nombreBanco.toUpperCase()) + '</strong>' + (lema ? '<small>' + esc(lema) + '</small>' : '') + '</span></span>'
+      '<span class="logo-c4" aria-label="' + nombre + '">' +
+      '<span class="logo-insignia" aria-hidden="true"><span>C<b>4</b></span></span>' +
+      '<span class="logo-texto"><strong>' + marca + '</strong>' + (lema ? '<small>' + esc(lema) + '</small>' : '') + '</span></span>'
     );
   }
 
