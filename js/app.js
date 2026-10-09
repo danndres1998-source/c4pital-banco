@@ -27,6 +27,8 @@
     seleccion: null,
     filtroClientes: '',
     nuevasCuentas: null,
+    pila: [], // pantallas anteriores, para el botón de volver
+    calc: 'simple', // calculadora elegida
   };
   restaurarSesion();
 
@@ -112,8 +114,9 @@
     return ui.ocultar ? estado.config.simbolo + ' • • • • •' : esc(dinero(centavos));
   }
 
-  function conSigno(centavos) {
-    return '<span class="' + (centavos >= 0 ? 'positivo' : 'negativo') + '">' + (centavos > 0 ? '+' : '') + esc(dinero(centavos)) + '</span>';
+  function conSigno(centavos, cuenta) {
+    const texto = cuenta === 'dolares' ? B.formatear(centavos, B.SIMBOLO_USD) : dinero(centavos);
+    return '<span class="' + (centavos >= 0 ? 'positivo' : 'negativo') + '">' + (centavos > 0 ? '+' : '') + esc(texto) + '</span>';
   }
 
   function unidades(centavos) {
@@ -167,9 +170,15 @@
     return 'C4-' + String(estado.mes).padStart(2, '0') + '-' + String(m ? m.id.replace(/\D/g, '') : 0).padStart(6, '0');
   }
 
+  function nombreTipo(tipo) {
+    return (B.TIPOS_PRESTAMO[tipo] || B.TIPOS_PRESTAMO.personal).nombre;
+  }
+
   function resumenCliente(c) {
     const activos = B.prestamosActivos(c);
+    const rt = B.resumenTarjeta(c);
     return {
+      tarjetaMora: !!(rt && rt.saldoCorte > 0 && rt.minimoPendiente > 0 && c.movimientos.some((m) => m.tipo === 'mora' && m.cuenta === 'tarjeta' && m.mes === estado.mes - 1)),
       activos,
       deuda: activos.reduce((s, p) => s + B.resumenPrestamo(p).saldoPendiente, 0),
       atrasadas: activos.reduce((s, p) => s + B.resumenPrestamo(p).cuotasAtrasadas, 0),
@@ -241,15 +250,35 @@
     prestamo: ['prestamo', 'morado'],
     cuota: ['pagos', 'morado'],
     pago: ['pagos', 'oro'],
+    comision: ['porcentaje', 'rojo'],
+    impuesto: ['pagos', 'rojo'],
+    mora: ['alerta', 'rojo'],
+    'interes-cobrado': ['porcentaje', 'rojo'],
+    compra: ['tarjeta', 'morado'],
+    avance: ['dinero', 'morado'],
+    'pago-tarjeta': ['tarjeta', 'verde'],
+    certificado: ['escudo', 'verde'],
+    divisas: ['dolar', 'turquesa'],
   };
+
+  const NOMBRE_CUENTA = { corriente: 'Corriente', ahorro: 'Ahorro', dolares: 'Dólares', tarjeta: 'Tarjeta' };
+
+  /** Formatea según la moneda de la cuenta (dólares o la moneda del banco). */
+  function dineroDe(cuenta, centavos) {
+    return cuenta === 'dolares' ? B.formatear(centavos, B.SIMBOLO_USD) : dinero(centavos);
+  }
+
+  function usd(centavos) {
+    return B.formatear(centavos, B.SIMBOLO_USD);
+  }
 
   function itemMovimiento(m, nombre) {
     const estilo = m.tipo === 'transferencia' ? ['transferir', m.monto >= 0 ? 'verde' : 'rojo'] : ESTILO_MOV[m.tipo] || ['dinero', ''];
     return (
       '<li class="item"><span class="item-icono ' + estilo[1] + '">' + I(estilo[0]) + '</span>' +
       '<span class="item-texto"><strong>' + esc(m.descripcion) + '</strong><small>' + (nombre ? esc(nombre) + ' · ' : '') +
-      (m.cuenta === 'ahorro' ? 'Ahorro' : 'Corriente') + ' · Mes ' + m.mes + ' · ' + esc(fechaCorta(m.fecha)) + '</small></span>' +
-      '<span class="item-monto">' + conSigno(m.monto) + '<small>' + (ui.ocultar && !nombre ? '' : 'Saldo ' + esc(dinero(m.saldo))) + '</small></span></li>'
+      (NOMBRE_CUENTA[m.cuenta] || 'Corriente') + ' · Mes ' + m.mes + ' · ' + esc(fechaCorta(m.fecha)) + '</small></span>' +
+      '<span class="item-monto">' + conSigno(m.monto, m.cuenta) + '<small>' + (ui.ocultar && !nombre ? '' : (m.cuenta === 'tarjeta' ? 'Deuda ' + esc(dinero(-m.saldo)) : 'Saldo ' + esc(dineroDe(m.cuenta, m.saldo)))) + '</small></span></li>'
     );
   }
 
@@ -261,7 +290,7 @@
   function barraSuperior(titulo, accion, icono, clara) {
     return (
       '<header class="barra-superior' + (clara ? ' clara' : '') + '">' +
-      '<button class="icono-boton" data-accion="' + (accion || 'atras') + '" aria-label="Volver">' + I(icono || 'atras') + '</button>' +
+      '<button class="icono-boton" data-accion="' + (accion || 'volver') + '" aria-label="Volver">' + I(icono || 'atras') + '</button>' +
       '<h1>' + esc(titulo) + '</h1></header>'
     );
   }
@@ -282,12 +311,13 @@
     );
   }
 
-  function campoMontoGrande(valor, disponible) {
+  function campoMontoGrande(valor, disponible, simbolo) {
+    simbolo = simbolo || estado.config.simbolo;
     return (
-      '<div class="monto-grande"><span>' + esc(estado.config.simbolo) + '</span>' +
+      '<div class="monto-grande"><span>' + esc(simbolo) + '</span>' +
       '<input name="monto" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0.00" aria-label="Monto" required value="' + esc(valor || '') + '" /></div>' +
-      (disponible != null ? '<p class="disponible">Disponible: <strong>' + esc(dinero(disponible)) + '</strong></p>' : '') +
-      '<div class="montos-rapidos">' + [50, 100, 250, 500].map((v) => '<button type="button" data-accion="monto-rapido" data-valor="' + v + '">' + esc(estado.config.simbolo) + v + '</button>').join('') + '</div>'
+      (disponible != null ? '<p class="disponible">Disponible: <strong>' + esc(B.formatear(disponible, simbolo)) + '</strong></p>' : '') +
+      '<div class="montos-rapidos">' + (simbolo === B.SIMBOLO_USD ? [5, 10, 20, 50] : [50, 100, 250, 500]).map((v) => '<button type="button" data-accion="monto-rapido" data-valor="' + v + '">' + esc(simbolo) + v + '</button>').join('') + '</div>'
     );
   }
 
@@ -360,11 +390,27 @@
       cuerpo = pantallaOperacion(c);
       nav = false;
     } else {
-      cuerpo = ({ inicio: pInicio, movimientos: pMovimientos, producto: pProducto, pagos: pPagos, prestamos: pPrestamos, mas: pMas }[ui.pantalla] || pInicio)(c);
-      if (ui.pantalla === 'movimientos' || ui.pantalla === 'producto') nav = false;
+      const pantallas = {
+        inicio: pInicio,
+        movimientos: pMovimientos,
+        producto: pProducto,
+        pagos: pPagos,
+        productos: pProductos,
+        prestamos: pPrestamos,
+        certificados: pCertificados,
+        divisas: pDivisas,
+        calculadoras: pCalculadoras,
+        tarifario: pTarifario,
+        mas: pMas,
+      };
+      cuerpo = (pantallas[ui.pantalla] || pInicio)(c);
+      if (SUBPANTALLAS.includes(ui.pantalla)) nav = false;
     }
     return '<div class="movil"><main class="contenido' + (nav ? '' : ' sin-nav') + '">' + cuerpo + '</main>' + (nav ? navInferior(c) : '') + '</div>';
   }
+
+  /** Pantallas con botón de volver (sin menú inferior). */
+  const SUBPANTALLAS = ['movimientos', 'producto', 'prestamos', 'certificados', 'divisas', 'calculadoras', 'tarifario'];
 
   function navInferior(c) {
     const r = resumenCliente(c);
@@ -372,7 +418,7 @@
       ['inicio', 'inicio', 'Inicio'],
       ['transferir', 'transferir', 'Transferir'],
       ['pagos', 'pagos', 'Pagos'],
-      ['prestamos', 'prestamo', 'Préstamos'],
+      ['productos', 'billetera', 'Productos'],
       ['mas', 'mas', 'Más'],
     ];
     return (
@@ -381,7 +427,7 @@
         .map(
           ([id, ico, txt]) =>
             '<button data-accion="ir" data-valor="' + id + '"' + (ui.pantalla === id ? ' aria-current="page"' : '') + '>' + I(ico) + txt +
-            (id === 'prestamos' && r.atrasadas ? '<span class="punto-alerta"></span>' : '') + '</button>'
+            (id === 'productos' && (r.atrasadas || r.tarjetaMora) ? '<span class="punto-alerta"></span>' : '') + '</button>'
         )
         .join('') +
       '</nav>'
@@ -391,6 +437,8 @@
   function pInicio(c) {
     const r = resumenCliente(c);
     const total = c.saldos.corriente + c.saldos.ahorro;
+    const rt = B.resumenTarjeta(c);
+    const certs = B.certificadosActivos(c);
     let html =
       '<section class="cabecera"><div class="cabecera-fila"><span class="avatar">' + iniciales(c.nombre) + '</span>' +
       '<div class="saludo"><small>' + saludoHora() + ',</small><strong>' + esc(c.nombre) + '</strong></div>' +
@@ -409,12 +457,26 @@
     r.activos.forEach((p) => {
       const rp = B.resumenPrestamo(p);
       html +=
-        '<button class="producto prestamo" data-accion="producto" data-valor="' + esc(p.id) + '"><span class="producto-tipo">' + I('prestamo') + 'Préstamo personal</span>' +
+        '<button class="producto prestamo" data-accion="producto" data-valor="' + esc(p.id) + '"><span class="producto-tipo">' + I('prestamo') + 'Préstamo ' + esc(nombreTipo(p.tipo).toLowerCase()) + '</span>' +
         '<span class="producto-saldo">' + saldo(rp.saldoPendiente) + '</span><span class="producto-pie"><span>Saldo pendiente</span><span>' + p.cuotasPagadas + '/' + p.plazo + ' cuotas</span></span></button>';
     });
-    if (!r.activos.length) {
-      html += '<button class="producto nuevo" data-accion="operar" data-valor="solicitud">' + I('mas1') + 'Solicitar un préstamo</button>';
+    if (rt) {
+      html +=
+        '<button class="producto credito" data-accion="producto" data-valor="tarjeta"><span class="producto-tipo">' + I('tarjeta') + 'Tarjeta de crédito<span class="producto-chip"></span></span>' +
+        '<span class="producto-saldo">' + saldo(rt.disponible) + '</span><span class="producto-pie"><span>Disponible · debe ' + saldo(rt.deuda) + '</span><span>•••• ' + esc(c.tarjeta.numero.slice(-4)) + '</span></span></button>';
     }
+    if (certs.length) {
+      html +=
+        '<button class="producto certificado" data-accion="ir" data-valor="certificados"><span class="producto-tipo">' + I('escudo') + 'Certificados</span>' +
+        '<span class="producto-saldo">' + saldo(certs.reduce((t, x) => t + x.capital + x.interes, 0)) + '</span><span class="producto-pie"><span>' + certs.length + ' activo(s)</span><span>' + estado.config.tasaCertificadoMensual + '% mensual</span></span></button>';
+    }
+    if (c.saldos.dolares > 0) {
+      html +=
+        '<button class="producto dolares" data-accion="producto" data-valor="dolares"><span class="producto-tipo">' + I('dolar') + 'Cuenta en dólares</span>' +
+        '<span class="producto-saldo">' + (ui.ocultar ? 'US$ • • • •' : esc(usd(c.saldos.dolares))) + '</span><span class="producto-pie"><span>≈ ' + saldo(Math.round(c.saldos.dolares * estado.config.tasaCompraUSD)) + '</span><span>' + mascara(c.numero) + '-D</span></span></button>';
+    }
+    if (!rt) html += '<button class="producto nuevo" data-accion="producto" data-valor="tarjeta">' + I('tarjeta') + 'Pide tu tarjeta de crédito</button>';
+    else if (!r.activos.length) html += '<button class="producto nuevo" data-accion="operar" data-valor="solicitud">' + I('mas1') + 'Solicitar un préstamo</button>';
     html += '</div>';
 
     if (r.atrasadas) {
@@ -423,6 +485,11 @@
     if (r.solicitud) {
       html += '<div class="seccion"><div class="aviso-banner azul">' + I('reloj') + '<span>Tu solicitud de préstamo por <strong>' + esc(dinero(r.solicitud.monto)) + '</strong> está en revisión.</span></div></div>';
     }
+    if (rt && rt.minimoPendiente > 0) {
+      html +=
+        '<div class="seccion"><div class="aviso-banner' + (r.tarjetaMora ? ' rojo' : '') + '">' + I('tarjeta') + '<span>Pago mínimo de tu tarjeta: <strong>' + esc(dinero(rt.minimoPendiente)) +
+        '</strong> antes del cierre del mes ' + estado.mes + '. <button class="enlace" data-accion="operar" data-valor="pago-tarjeta">Pagar</button></span></div></div>';
+    }
 
     const accesos = [
       ['operar', 'transferencia', 'transferir', 'Transferir'],
@@ -430,8 +497,12 @@
       ['operar', 'retiro', 'salida', 'Retirar'],
       ['operar', 'servicio', 'pagos', 'Pagar servicios'],
       ['operar', 'mover', 'alcancia', 'Ahorrar'],
-      ['operar', 'solicitud', 'prestamo', 'Pedir préstamo'],
-      ['operar', 'cuota', 'calendario', 'Pagar préstamo'],
+      ['producto', 'tarjeta', 'tarjeta', 'Tarjeta de crédito'],
+      ['ir', 'prestamos', 'prestamo', 'Préstamos'],
+      ['ir', 'certificados', 'escudo', 'Certificados'],
+      ['ir', 'divisas', 'dolar', 'Divisas'],
+      ['ir', 'calculadoras', 'calculadora', 'Calculadoras'],
+      ['ir', 'tarifario', 'lista', 'Tarifario'],
       ['ir', 'mas', 'libro', 'Aprende'],
     ];
     html +=
@@ -449,7 +520,7 @@
   function pMovimientos(c) {
     const filtro = ui.filtroMov;
     const movs = c.movimientos.filter((m) => filtro === 'todos' || (filtro === 'entradas' ? m.monto > 0 : m.monto < 0));
-    let html = barraSuperior('Movimientos', 'ir', 'atras') ;
+    let html = barraSuperior('Movimientos');
     html +=
       '<div class="seccion"><div class="segmentos" role="group">' +
       [['todos', 'Todos'], ['entradas', 'Entradas'], ['salidas', 'Salidas']]
@@ -469,14 +540,16 @@
   function pProducto(c) {
     if (ui.producto === 'corriente') return productoCorriente(c);
     if (ui.producto === 'ahorro') return productoAhorro(c);
+    if (ui.producto === 'dolares') return productoDolares(c);
+    if (ui.producto === 'tarjeta') return productoTarjeta(c);
     const p = c.prestamos.find((x) => x.id === ui.producto);
     return p ? productoPrestamo(c, p) : pInicio(c);
   }
 
-  function cabezaDetalle(clase, titulo, montoHtml, numero, acciones, extra) {
+  function cabezaDetalle(clase, titulo, montoHtml, numero, acciones, extra, etiqueta) {
     return (
-      barraSuperior(titulo, 'ir', 'atras').replace('barra-superior', 'barra-superior ' + clase) +
-      '<section class="detalle-cabeza ' + clase + '"><small>' + (clase === 'prestamo' ? 'Saldo pendiente' : 'Saldo disponible') + '</small>' +
+      barraSuperior(titulo).replace('barra-superior', 'barra-superior ' + clase) +
+      '<section class="detalle-cabeza ' + clase + '"><small>' + (etiqueta || (clase === 'prestamo' ? 'Saldo pendiente' : 'Saldo disponible')) + '</small>' +
       '<div class="saldo">' + montoHtml + '</div>' +
       (numero ? '<button class="numero enlace" style="color:inherit" data-accion="copiar" data-valor="' + esc(numero) + '">Cuenta ' + esc(numero) + ' ' + I('copiar') + '</button>' : '') +
       (extra || '') +
@@ -484,60 +557,141 @@
     );
   }
 
+  function datos(pares) {
+    return '<div class="panel datos" style="display:grid">' + pares.map(([e, v]) => '<div><small>' + esc(e) + '</small><strong>' + v + '</strong></div>').join('') + '</div>';
+  }
+
+  function seccion(titulo, contenido, extra) {
+    return '<section class="seccion"' + (extra || '') + '>' + (titulo ? '<div class="seccion-titulo"><h2>' + esc(titulo) + '</h2></div>' : '') + contenido + '</section>';
+  }
+
   function productoCorriente(c) {
+    const cfg = estado.config;
     let html = cabezaDetalle('', 'Cuenta Corriente', saldo(c.saldos.corriente), c.numero, [
       ['operar', 'transferencia', 'transferir', 'Transferir'],
       ['operar', 'deposito', 'entrada', 'Depositar'],
       ['operar', 'retiro', 'salida', 'Retirar'],
     ]);
-    html +=
-      '<section class="seccion"><div class="panel datos" style="display:grid">' +
-      '<div><small>Titular</small><strong>' + esc(c.nombre) + '</strong></div><div><small>Estado</small><strong><span class="etiqueta verde">Activa</span></strong></div>' +
-      '<div><small>Moneda</small><strong>' + esc(estado.config.simbolo) + ' (didáctico)</strong></div><div><small>Abierta en</small><strong>Mes ' + c.creadoMes + '</strong></div></div></section>';
-    html += '<section class="seccion"><div class="seccion-titulo"><h2>Movimientos de la cuenta</h2></div><div class="panel">' + listaMovimientos(c.movimientos.filter((m) => m.cuenta === 'corriente')) + '</div></section>';
+    html += seccion(
+      '',
+      datos([
+        ['Titular', esc(c.nombre)],
+        ['Estado', '<span class="etiqueta verde">Activa</span>'],
+        ['Saldo mínimo', esc(dinero(cfg.saldoMinimo))],
+        ['Mantenimiento', esc(dinero(cfg.cargoMantenimiento)) + ' si bajas del mínimo'],
+      ])
+    );
+    if (cfg.cargoMantenimiento > 0 && c.saldos.corriente < cfg.saldoMinimo) {
+      html += '<div class="seccion"><div class="aviso-banner">' + I('alerta') + '<span>Tu saldo está por debajo de ' + esc(dinero(cfg.saldoMinimo)) + '. Al cerrar el mes se cobrará un cargo de mantenimiento de ' + esc(dinero(cfg.cargoMantenimiento)) + '.</span></div></div>';
+    }
+    html += seccion('Movimientos de la cuenta', '<div class="panel">' + listaMovimientos(c.movimientos.filter((m) => m.cuenta === 'corriente')) + '</div>');
     return html;
   }
 
   function productoAhorro(c) {
     const tasa = estado.config.tasaAhorroMensual;
-    const ganado = c.movimientos.filter((m) => m.tipo === 'interes').reduce((s, m) => s + m.monto, 0);
-    const proximo = Math.round((c.saldos.ahorro * tasa) / 100);
+    const ganado = c.movimientos.filter((m) => m.tipo === 'interes' && m.cuenta === 'ahorro').reduce((s, m) => s + m.monto, 0);
     let html = cabezaDetalle('ahorro', 'Cuenta de Ahorro', saldo(c.saldos.ahorro), c.numero + '-A', [
       ['operar', 'mover', 'entrada', 'Guardar'],
       ['operar', 'mover-sacar', 'salida', 'Sacar'],
-      ['ir-calculadora', '', 'calculadora', 'Calcular'],
+      ['calc', 'compuesto', 'calculadora', 'Calcular'],
     ]);
-    html +=
-      '<section class="seccion"><div class="panel datos" style="display:grid">' +
-      '<div><small>Tasa de interés</small><strong>' + tasa + '% mensual</strong></div><div><small>Tipo de interés</small><strong>Compuesto</strong></div>' +
-      '<div><small>Intereses ganados</small><strong class="positivo">' + esc(dinero(ganado)) + '</strong></div><div><small>Próximo interés</small><strong>' + esc(dinero(proximo)) + '</strong></div></div>' +
-      '<p class="ayuda" style="margin-top:8px">El interés se paga cuando tu docente cierra el mes.</p></section>';
-    const capital = c.saldos.ahorro || 100000;
-    html +=
-      '<section class="seccion" id="calculadora"><div class="seccion-titulo"><h2>Calculadora de ahorro</h2></div><div class="panel"><div class="panel-cuerpo formulario" data-calculadora="ahorro">' +
-      '<p class="formula">M = C · (1 + i)<sup>n</sup></p>' +
-      '<div class="fila-campos">' +
-      campo('Capital (C)', '<input name="capital" type="number" min="0" step="0.01" value="' + unidades(capital) + '" />', 'dinero') +
-      campo('Meses (n)', '<input name="meses" type="number" min="1" max="60" step="1" value="6" />', 'calendario') +
-      '</div><div data-resultado>' + resultadoAhorro(capital, 6) + '</div></div></div></section>';
-    html += '<section class="seccion"><div class="seccion-titulo"><h2>Movimientos del ahorro</h2></div><div class="panel">' + listaMovimientos(c.movimientos.filter((m) => m.cuenta === 'ahorro'), 'Todavía no has ahorrado. ¡Empieza hoy!') + '</div></section>';
+    html += seccion(
+      '',
+      datos([
+        ['Tasa de interés', tasa + '% mensual'],
+        ['Tipo de interés', 'Compuesto'],
+        ['Intereses ganados', '<span class="positivo">' + esc(dinero(ganado)) + '</span>'],
+        ['Próximo interés', esc(dinero(Math.round((c.saldos.ahorro * tasa) / 100)))],
+        ['Tasa anual equivalente', B.formulas.tasaAnualEquivalente(tasa).toFixed(2) + '%'],
+        ['Comisiones', 'Ninguna'],
+      ]) + '<p class="ayuda" style="margin-top:8px">El interés se paga cuando tu docente cierra el mes.</p>'
+    );
+    html += seccion('Movimientos del ahorro', '<div class="panel">' + listaMovimientos(c.movimientos.filter((m) => m.cuenta === 'ahorro'), 'Todavía no has ahorrado. ¡Empieza hoy!') + '</div>');
     return html;
   }
 
-  function resultadoAhorro(capital, meses) {
-    const tasa = estado.config.tasaAhorroMensual;
-    if (!(capital > 0) || !(meses >= 1)) return '<p class="ayuda">Escribe un capital y una cantidad de meses.</p>';
-    const filas = B.proyeccionAhorro(capital, tasa, meses);
-    const final = filas[filas.length - 1].saldo;
-    return (
-      '<div class="resumen">' +
-      filaResumen('Capital inicial', esc(dinero(capital))) +
-      filaResumen('Intereses ganados', '<span class="positivo">+' + esc(dinero(final - capital)) + '</span>') +
-      filaResumen('Tendrás en ' + meses + ' meses', esc(dinero(final)), 'total') +
-      '</div><details class="acordeon"><summary class="enlace" style="padding:8px 0">Ver mes a mes</summary><div class="tabla-envoltura"><table><thead><tr><th>Mes</th><th class="num">Interés</th><th class="num">Saldo</th></tr></thead><tbody>' +
-      filas.map((f) => '<tr><td>' + f.mes + '</td><td class="num">' + esc(dinero(f.interes)) + '</td><td class="num">' + esc(dinero(f.saldo)) + '</td></tr>').join('') +
-      '</tbody></table></div></details>'
+  function productoDolares(c) {
+    const cfg = estado.config;
+    let html = cabezaDetalle('dolares', 'Cuenta en dólares', ui.ocultar ? 'US$ • • • •' : esc(usd(c.saldos.dolares)), c.numero + '-D', [
+      ['operar', 'divisas', 'entrada', 'Comprar US$'],
+      ['operar', 'divisas-vender', 'salida', 'Vender US$'],
+      ['ir', 'divisas', 'globo', 'Tasas'],
+    ]);
+    html += seccion(
+      '',
+      datos([
+        ['Equivale a', esc(dinero(Math.round(c.saldos.dolares * cfg.tasaCompraUSD)))],
+        ['Tasa de compra', esc(dinero(Math.round(cfg.tasaCompraUSD * 100)))],
+        ['Tasa de venta', esc(dinero(Math.round(cfg.tasaVentaUSD * 100)))],
+        ['Moneda', 'Dólar estadounidense'],
+      ])
     );
+    html += seccion('Movimientos', '<div class="panel">' + listaMovimientos(c.movimientos.filter((m) => m.cuenta === 'dolares'), 'Todavía no tienes dólares.') + '</div>');
+    return html;
+  }
+
+  function tarjetaVisual(c) {
+    const t = c.tarjeta;
+    return (
+      '<div class="plastico"><div class="plastico-fila"><span class="marca"><span class="marca-logo" style="width:34px;height:34px;font-size:.85rem">C4</span>' + esc(estado.config.nombreBanco) + '</span><span>Crédito</span></div>' +
+      '<span class="producto-chip" style="margin:18px 0 10px"></span>' +
+      '<div class="plastico-numero">' + (t ? esc(t.numero) : '•••• •••• •••• ••••') + '</div>' +
+      '<div class="plastico-fila"><span>' + esc(c.nombre.toUpperCase()) + '</span><span>' + (t ? 'Desde mes ' + t.activadaMes : '') + '</span></div></div>'
+    );
+  }
+
+  function productoTarjeta(c) {
+    const cfg = estado.config;
+    const r = B.resumenTarjeta(c);
+    if (!r) {
+      return (
+        barraSuperior('Tarjeta de crédito') +
+        '<section class="seccion">' + tarjetaVisual(c) + '</section>' +
+        '<div class="paso-titulo"><h2>Pide tu tarjeta de crédito</h2><p>Compra ahora y paga después. Si pagas el total cada mes, no pagas intereses.</p></div>' +
+        seccion(
+          'Condiciones',
+          '<div class="panel"><div class="panel-cuerpo resumen">' +
+            filaResumen('Límite de crédito', esc(dinero(cfg.limiteTarjeta))) +
+            filaResumen('Tasa de interés', cfg.tasaTarjetaMensual + '% mensual (' + B.formulas.tasaAnualEquivalente(cfg.tasaTarjetaMensual).toFixed(1) + '% anual)') +
+            filaResumen('Pago mínimo', cfg.pagoMinimoPorcentaje + '% del saldo (mínimo ' + esc(dinero(cfg.pagoMinimoFijo)) + ')') +
+            filaResumen('Cargo por mora', esc(dinero(cfg.cargoMoraTarjeta))) +
+            filaResumen('Avance de efectivo', cfg.comisionAvance + '% de comisión') +
+            filaResumen('Cuota de emisión', esc(dinero(cfg.cuotaEmisionTarjeta))) +
+            '</div></div>'
+        ) +
+        '<section class="seccion"><button class="boton oro" data-accion="operar" data-valor="activar-tarjeta">' + I('tarjeta') + 'Solicitar mi tarjeta</button></section>'
+      );
+    }
+    let html = cabezaDetalle(
+      'credito',
+      'Tarjeta de crédito',
+      saldo(r.disponible),
+      null,
+      [
+        ['operar', 'compra', 'bolsa', 'Comprar'],
+        ['operar', 'avance', 'dinero', 'Avance'],
+        ['operar', 'pago-tarjeta', 'pagos', 'Pagar'],
+      ],
+      '<div class="progreso"><span style="width:' + r.uso + '%"></span></div><small>Usaste ' + saldo(r.deuda) + ' de ' + esc(dinero(r.limite)) + ' (' + r.uso + '%)</small>',
+      'Crédito disponible'
+    );
+    html += seccion(
+      'Estado de cuenta',
+      datos([
+        ['Saldo al corte', esc(dinero(r.saldoCorte))],
+        ['Pago mínimo', esc(dinero(r.pagoMinimo))],
+        ['Pagado desde el corte', esc(dinero(r.pagosDesdeCorte))],
+        ['Fecha límite', 'Cierre del mes ' + estado.mes],
+        ['Deuda actual', esc(dinero(r.deuda))],
+        ['Tasa', c.tarjeta.tasa + '% mensual'],
+      ]) +
+        (r.saldoCorte > 0
+          ? '<div class="aviso-banner azul" style="margin-top:12px">' + I('info') + '<span>Si pagas <strong>' + esc(dinero(r.cortePendiente)) + '</strong> (saldo al corte) antes del cierre, no pagas intereses. Si solo pagas el mínimo, pagarás ' + c.tarjeta.tasa + '% de interés sobre el resto.</span></div>'
+          : '<p class="ayuda" style="margin-top:8px">Tu primer estado de cuenta llegará al cerrar el mes.</p>')
+    );
+    html += seccion('Movimientos de la tarjeta', '<div class="panel">' + listaMovimientos(c.movimientos.filter((m) => m.cuenta === 'tarjeta'), 'Todavía no has usado tu tarjeta.') + '</div>');
+    return html;
   }
 
   function productoPrestamo(c, p) {
@@ -545,24 +699,33 @@
     const avance = Math.round((p.cuotasPagadas / p.plazo) * 100);
     let html = cabezaDetalle(
       'prestamo',
-      'Préstamo personal',
+      'Préstamo ' + nombreTipo(p.tipo).toLowerCase(),
       saldo(r.saldoPendiente),
       null,
       [
         ['operar', 'cuota', 'pagos', 'Pagar cuota'],
-        ['operar', 'transferencia', 'transferir', 'Transferir'],
+        ['calc', 'prestamo', 'calculadora', 'Simular'],
         ['ir', 'movimientos', 'reloj', 'Historial'],
       ],
       '<div class="progreso"><span style="width:' + avance + '%"></span></div><small>' + p.cuotasPagadas + ' de ' + p.plazo + ' cuotas pagadas</small>'
     );
-    if (r.cuotasAtrasadas) html += '<div class="seccion"><div class="aviso-banner rojo">' + I('alerta') + '<span>Tienes ' + r.cuotasAtrasadas + ' cuota(s) atrasada(s).</span></div></div>';
-    html +=
-      '<section class="seccion"><div class="panel datos" style="display:grid">' +
-      '<div><small>Monto prestado</small><strong>' + esc(dinero(p.monto)) + '</strong></div><div><small>Tasa</small><strong>' + p.tasa + '% mensual</strong></div>' +
-      '<div><small>Cuota fija</small><strong>' + esc(dinero(r.cuota)) + '</strong></div><div><small>Plazo</small><strong>' + p.plazo + ' meses</strong></div>' +
-      '<div><small>Total a pagar</small><strong>' + esc(dinero(r.totalPagar)) + '</strong></div><div><small>Total de intereses</small><strong class="negativo">' + esc(dinero(r.totalIntereses)) + '</strong></div>' +
-      '</div>' + (p.motivo ? '<p class="ayuda" style="margin-top:8px">Motivo: «' + esc(p.motivo) + '»</p>' : '') + '</section>';
-    html += '<section class="seccion"><div class="seccion-titulo"><h2>Tabla de amortización</h2></div><div class="panel">' + tablaAmortizacion(p.tabla, p.cuotasPagadas) + '</div></section>';
+    if (r.cuotasAtrasadas) {
+      html += '<div class="seccion"><div class="aviso-banner rojo">' + I('alerta') + '<span>Tienes ' + r.cuotasAtrasadas + ' cuota(s) atrasada(s)' + (r.mora ? ' y ' + esc(dinero(r.mora)) + ' de mora' : '') + '.</span></div></div>';
+    }
+    html += seccion(
+      '',
+      datos([
+        ['Monto prestado', esc(dinero(p.monto))],
+        ['Tasa', p.tasa + '% mensual'],
+        ['Sistema', esc(B.SISTEMAS[p.sistema])],
+        ['Plazo', p.plazo + ' meses'],
+        [p.sistema === 'aleman' ? 'Próxima cuota' : 'Cuota fija', esc(dinero(r.proximaCuota || r.cuota))],
+        ['Mora pendiente', esc(dinero(r.mora))],
+        ['Total a pagar', esc(dinero(r.totalPagar))],
+        ['Total de intereses', '<span class="negativo">' + esc(dinero(r.totalIntereses)) + '</span>'],
+      ]) + (p.motivo ? '<p class="ayuda" style="margin-top:8px">Motivo: «' + esc(p.motivo) + '»</p>' : '')
+    );
+    html += seccion('Tabla de amortización', '<div class="panel">' + tablaAmortizacion(p.tabla, p.cuotasPagadas) + '</div>');
     return html;
   }
 
@@ -578,104 +741,397 @@
 
   function pPagos(c) {
     const r = resumenCliente(c);
+    const rt = B.resumenTarjeta(c);
     let html = '<header class="barra-superior"><h1 style="margin-right:0">Pagos</h1></header>';
-    html += '<section class="seccion"><div class="seccion-titulo"><h2>Mis préstamos</h2></div><div class="panel">';
-    if (r.activos.length) {
-      html += r.activos
-        .map((p) => {
-          const rp = B.resumenPrestamo(p);
-          return (
-            '<button class="item" data-accion="operar" data-valor="cuota"><span class="item-icono morado">' + I('prestamo') + '</span>' +
-            '<span class="item-texto"><strong>Préstamo personal</strong><small>Cuota ' + (p.cuotasPagadas + 1) + ' de ' + p.plazo + (rp.cuotasAtrasadas ? ' · <span class="negativo">' + rp.cuotasAtrasadas + ' atrasada(s)</span>' : '') + '</small></span>' +
-            '<span class="item-monto">' + esc(dinero(rp.proximaCuota)) + '</span>' + I('flecha') + '</button>'
-          );
-        })
-        .join('');
-    } else {
-      html += '<div class="vacio">' + I('check') + '<p>No tienes préstamos por pagar.</p></div>';
+    let propios = '';
+    r.activos.forEach((p) => {
+      const rp = B.resumenPrestamo(p);
+      propios +=
+        '<button class="item" data-accion="operar" data-valor="cuota"><span class="item-icono morado">' + I('prestamo') + '</span>' +
+        '<span class="item-texto"><strong>Préstamo ' + esc(nombreTipo(p.tipo).toLowerCase()) + '</strong><small>Cuota ' + (p.cuotasPagadas + 1) + ' de ' + p.plazo + (rp.cuotasAtrasadas ? ' · <span class="negativo">' + rp.cuotasAtrasadas + ' atrasada(s)</span>' : '') + '</small></span>' +
+        '<span class="item-monto">' + esc(dinero(rp.proximoPago)) + '</span>' + I('flecha') + '</button>';
+    });
+    if (rt && rt.deuda > 0) {
+      propios +=
+        '<button class="item" data-accion="operar" data-valor="pago-tarjeta"><span class="item-icono">' + I('tarjeta') + '</span>' +
+        '<span class="item-texto"><strong>Tarjeta de crédito</strong><small>Mínimo ' + esc(dinero(rt.minimoPendiente)) + ' · Total ' + esc(dinero(rt.deuda)) + '</small></span>' + I('flecha') + '</button>';
     }
-    html += '</div></section>';
-    html +=
-      '<section class="seccion"><div class="seccion-titulo"><h2>Pago de servicios</h2></div><div class="panel">' +
-      SERVICIOS.map(
-        ([s, ico]) =>
-          '<button class="item" data-accion="operar" data-valor="servicio" data-servicio="' + esc(s) + '"><span class="item-icono oro">' + I(ico) + '</span>' +
-          '<span class="item-texto"><strong>' + esc(s) + '</strong><small>Pago simulado</small></span>' + I('flecha') + '</button>'
-      ).join('') +
-      '</div></section>';
+    html += seccion('Mis productos', '<div class="panel">' + (propios || '<div class="vacio">' + I('check') + '<p>No tienes pagos pendientes.</p></div>') + '</div>');
+    html += seccion(
+      'Pago de servicios',
+      '<div class="panel">' +
+        SERVICIOS.map(
+          ([s, ico]) =>
+            '<button class="item" data-accion="operar" data-valor="servicio" data-servicio="' + esc(s) + '"><span class="item-icono oro">' + I(ico) + '</span>' +
+            '<span class="item-texto"><strong>' + esc(s) + '</strong><small>Pago simulado</small></span>' + I('flecha') + '</button>'
+        ).join('') +
+        '</div>'
+    );
+    return html;
+  }
+
+  function itemDepartamento(accion, valor, icono, color, titulo, detalle, derecha) {
+    return (
+      '<button class="item" data-accion="' + accion + '" data-valor="' + esc(valor) + '"><span class="item-icono ' + color + '">' + I(icono) + '</span>' +
+      '<span class="item-texto"><strong>' + titulo + '</strong><small>' + detalle + '</small></span>' + (derecha ? '<span class="item-monto">' + derecha + '</span>' : '') + I('flecha') + '</button>'
+    );
+  }
+
+  function pProductos(c) {
+    const cfg = estado.config;
+    const r = resumenCliente(c);
+    const rt = B.resumenTarjeta(c);
+    const certs = B.certificadosActivos(c);
+    let html = '<header class="barra-superior"><h1 style="margin-right:0">Productos</h1></header>';
+    html += seccion(
+      'Cuentas',
+      '<div class="panel">' +
+        itemDepartamento('producto', 'corriente', 'tarjeta', '', 'Cuenta corriente', 'Para tus pagos y transferencias', saldo(c.saldos.corriente)) +
+        itemDepartamento('producto', 'ahorro', 'alcancia', 'turquesa', 'Cuenta de ahorro', 'Gana ' + cfg.tasaAhorroMensual + '% mensual compuesto', saldo(c.saldos.ahorro)) +
+        itemDepartamento('producto', 'dolares', 'dolar', 'turquesa', 'Cuenta en dólares', 'Ahorra en otra moneda', ui.ocultar ? 'US$ •••' : esc(usd(c.saldos.dolares))) +
+        '</div>'
+    );
+    html += seccion(
+      'Crédito',
+      '<div class="panel">' +
+        itemDepartamento('producto', 'tarjeta', 'tarjeta', 'morado', 'Tarjeta de crédito', rt ? 'Disponible ' + esc(dinero(rt.disponible)) : 'Límite de ' + esc(dinero(cfg.limiteTarjeta)) + ' · pídela aquí', rt ? saldo(rt.deuda) : '') +
+        itemDepartamento('ir', 'prestamos', 'prestamo', 'morado', 'Préstamos', 'Personal, educativo y emprendimiento', r.activos.length ? saldo(r.deuda) : '') +
+        '</div>'
+    );
+    html += seccion(
+      'Inversión y divisas',
+      '<div class="panel">' +
+        itemDepartamento('ir', 'certificados', 'escudo', 'verde', 'Certificados de depósito', 'Plazo fijo al ' + cfg.tasaCertificadoMensual + '% mensual', certs.length ? saldo(certs.reduce((t, x) => t + x.capital, 0)) : '') +
+        itemDepartamento('ir', 'divisas', 'globo', 'turquesa', 'Cambio de divisas', 'Compra ' + cfg.tasaCompraUSD + ' · Venta ' + cfg.tasaVentaUSD) +
+        '</div>'
+    );
+    html += seccion(
+      'Herramientas',
+      '<div class="panel">' +
+        itemDepartamento('ir', 'calculadoras', 'calculadora', 'oro', 'Calculadoras financieras', 'Interés simple, compuesto, anualidades y más') +
+        itemDepartamento('ir', 'tarifario', 'lista', 'oro', 'Tarifario', 'Todas las tasas, comisiones e impuestos') +
+        '</div>'
+    );
     return html;
   }
 
   function pPrestamos(c) {
     const r = resumenCliente(c);
     const cfg = estado.config;
-    let html = '<header class="barra-superior"><h1 style="margin-right:0">Préstamos</h1></header>';
+    let html = barraSuperior('Préstamos');
     if (r.solicitud) {
       html += '<div class="seccion"><div class="aviso-banner azul">' + I('reloj') + '<span>Tu solicitud por <strong>' + esc(dinero(r.solicitud.monto)) + '</strong> a ' + r.solicitud.plazo + ' meses está en revisión.</span></div></div>';
     }
     if (r.activos.length) {
-      html += '<section class="seccion"><div class="seccion-titulo"><h2>Mis préstamos</h2></div><div class="panel">';
-      html += r.activos
-        .map((p) => {
-          const rp = B.resumenPrestamo(p);
-          return (
-            '<button class="item" data-accion="producto" data-valor="' + esc(p.id) + '"><span class="item-icono morado">' + I('prestamo') + '</span>' +
-            '<span class="item-texto"><strong>Préstamo de ' + esc(dinero(p.monto)) + '</strong><small>' + p.cuotasPagadas + ' de ' + p.plazo + ' cuotas · ' + p.tasa + '% mensual</small>' +
-            '<div class="progreso claro" style="margin:8px 0 0;height:6px"><span style="width:' + Math.round((p.cuotasPagadas / p.plazo) * 100) + '%;background:var(--morado)"></span></div></span>' +
-            '<span class="item-monto">' + saldo(rp.saldoPendiente) + '<small>pendiente</small></span></button>'
-          );
-        })
-        .join('');
-      html += '</div></section>';
+      html += seccion(
+        'Mis préstamos',
+        '<div class="panel">' +
+          r.activos
+            .map((p) => {
+              const rp = B.resumenPrestamo(p);
+              return (
+                '<button class="item" data-accion="producto" data-valor="' + esc(p.id) + '"><span class="item-icono morado">' + I('prestamo') + '</span>' +
+                '<span class="item-texto"><strong>' + esc(nombreTipo(p.tipo)) + ' · ' + esc(dinero(p.monto)) + '</strong><small>' + p.cuotasPagadas + ' de ' + p.plazo + ' cuotas · ' + p.tasa + '% mensual</small>' +
+                '<div class="progreso claro" style="margin:8px 0 0;height:6px"><span style="width:' + Math.round((p.cuotasPagadas / p.plazo) * 100) + '%;background:var(--morado)"></span></div></span>' +
+                '<span class="item-monto">' + saldo(rp.saldoPendiente) + '<small>pendiente</small></span></button>'
+              );
+            })
+            .join('') +
+          '</div>'
+      );
     }
+    html += seccion(
+      'Tipos de préstamo',
+      '<div class="panel">' +
+        Object.keys(B.TIPOS_PRESTAMO)
+          .map((k) => {
+            const tasa = cfg[B.TIPOS_PRESTAMO[k].tasa];
+            return '<div class="item"><span class="item-icono morado">' + I(k === 'educativo' ? 'libro' : k === 'emprendimiento' ? 'grafica' : 'usuario') + '</span><span class="item-texto"><strong>' + esc(B.TIPOS_PRESTAMO[k].nombre) + '</strong><small>' + B.formulas.tasaAnualEquivalente(tasa).toFixed(1) + '% anual equivalente</small></span><span class="item-monto">' + tasa + '%<small>mensual</small></span></div>';
+          })
+          .join('') +
+        '<div class="panel-cuerpo resumen">' +
+        filaResumen('Monto máximo', esc(dinero(cfg.montoMaximoPrestamo))) +
+        filaResumen('Plazos', cfg.plazosPrestamo.join(', ') + ' meses') +
+        filaResumen('Comisión de apertura', cfg.comisionApertura + '% del monto') +
+        filaResumen('Cargo por mora', esc(dinero(cfg.cargoMoraPrestamo)) + ' por mes atrasado') +
+        filaResumen('Sistemas', 'Francés o alemán') +
+        '</div>' +
+        '<div class="panel-cuerpo" style="padding-top:0">' +
+        (r.activos.length || r.solicitud
+          ? '<p class="ayuda">Podrás pedir otro préstamo cuando termines de pagar el actual.</p>'
+          : '<button class="boton" data-accion="operar" data-valor="solicitud">' + I('mas1') + 'Solicitar préstamo</button>') +
+        '</div></div>'
+    );
     const pagados = c.prestamos.filter((p) => B.resumenPrestamo(p).terminado);
-    html +=
-      '<section class="seccion"><div class="panel"><div class="panel-cuerpo formulario">' +
-      '<div class="cabecera-fila"><span class="item-icono morado">' + I('calculadora') + '</span><div><h2 style="font-size:1.05rem">Préstamo personal</h2><p class="ayuda">Cuota fija mensual (sistema francés)</p></div></div>' +
-      '<div class="datos" style="border-radius:14px;overflow:hidden;border:1px solid var(--borde)">' +
-      '<div><small>Tasa</small><strong>' + cfg.tasaPrestamoMensual + '% mensual</strong></div><div><small>Hasta</small><strong>' + esc(dinero(cfg.montoMaximoPrestamo)) + '</strong></div>' +
-      '<div><small>Plazos</small><strong>' + cfg.plazosPrestamo.join(', ') + ' meses</strong></div><div><small>Aprobación</small><strong>Docente</strong></div></div>' +
-      (r.activos.length || r.solicitud
-        ? '<p class="ayuda">Podrás pedir otro préstamo cuando termines de pagar el actual.</p>'
-        : '<button class="boton" data-accion="operar" data-valor="solicitud">' + I('mas1') + 'Solicitar préstamo</button>') +
-      '</div></div></section>';
     if (pagados.length) {
-      html +=
-        '<section class="seccion"><div class="seccion-titulo"><h2>Préstamos pagados</h2></div><div class="panel">' +
-        pagados.map((p) => '<div class="item"><span class="item-icono verde">' + I('check') + '</span><span class="item-texto"><strong>Préstamo de ' + esc(dinero(p.monto)) + '</strong><small>' + p.plazo + ' meses · Pagado</small></span></div>').join('') +
-        '</div></section>';
+      html += seccion(
+        'Préstamos pagados',
+        '<div class="panel">' +
+          pagados.map((p) => '<div class="item"><span class="item-icono verde">' + I('check') + '</span><span class="item-texto"><strong>' + esc(nombreTipo(p.tipo)) + ' · ' + esc(dinero(p.monto)) + '</strong><small>' + p.plazo + ' meses · Pagado</small></span></div>').join('') +
+          '</div>'
+      );
     }
     return html;
+  }
+
+  function pCertificados(c) {
+    const cfg = estado.config;
+    const activos = B.certificadosActivos(c);
+    const otros = c.certificados.filter((x) => x.estado !== 'activo');
+    let html = barraSuperior('Certificados de depósito');
+    html +=
+      '<div class="paso-titulo"><h2>Haz crecer tu dinero a plazo fijo</h2><p>Dejas tu dinero quieto un tiempo y el banco te paga más interés que en el ahorro.</p></div>' +
+      seccion(
+        '',
+        datos([
+          ['Tasa', cfg.tasaCertificadoMensual + '% mensual'],
+          ['Plazos', cfg.plazosCertificado.join(', ') + ' meses'],
+          ['Monto mínimo', esc(dinero(cfg.montoMinimoCertificado))],
+          ['Cancelación anticipada', cfg.penalidadCertificado + '% de penalidad'],
+        ]) + '<button class="boton" style="margin-top:14px" data-accion="operar" data-valor="certificado">' + I('mas1') + 'Abrir certificado</button>'
+      );
+    if (activos.length) {
+      html += seccion(
+        'Mis certificados',
+        '<div class="panel">' +
+          activos
+            .map((x) => {
+              const proy = B.proyeccionCertificado(x.capital, x.tasa, x.plazo, x.tipo);
+              return (
+                '<div class="panel-cuerpo" style="border-bottom:1px solid var(--borde)"><div class="cabecera-fila"><span class="item-icono verde">' + I('escudo') + '</span>' +
+                '<div class="item-texto"><strong>' + esc(dinero(x.capital)) + ' a ' + x.plazo + ' meses</strong><small>Interés ' + x.tipo + ' · ' + x.tasa + '% mensual · desde el mes ' + x.mesInicio + '</small></div>' +
+                '<span class="etiqueta verde">' + x.meses + '/' + x.plazo + '</span></div>' +
+                '<div class="progreso claro" style="height:6px"><span style="width:' + Math.round((x.meses / x.plazo) * 100) + '%;background:var(--verde)"></span></div>' +
+                '<div class="resumen">' +
+                filaResumen('Intereses ganados hasta hoy', '<span class="positivo">' + esc(dinero(x.interes)) + '</span>') +
+                filaResumen('Recibirás al vencer', esc(dinero(proy.final))) +
+                '</div><button class="boton chico borde" style="color:var(--rojo)" data-accion="cancelar-certificado" data-valor="' + esc(x.id) + '">Cancelar antes de tiempo</button></div>'
+              );
+            })
+            .join('') +
+          '</div>'
+      );
+    }
+    if (otros.length) {
+      html += seccion(
+        'Historial',
+        '<div class="panel">' +
+          otros
+            .map((x) => '<div class="item"><span class="item-icono ' + (x.estado === 'vencido' ? 'verde' : 'rojo') + '">' + I(x.estado === 'vencido' ? 'check' : 'cerrar') + '</span><span class="item-texto"><strong>' + esc(dinero(x.capital)) + ' a ' + x.plazo + ' meses</strong><small>' + (x.estado === 'vencido' ? 'Vencido · ganó ' + esc(dinero(x.interes)) : 'Cancelado antes de tiempo') + '</small></span></div>')
+            .join('') +
+          '</div>'
+      );
+    }
+    return html;
+  }
+
+  function pDivisas(c) {
+    const cfg = estado.config;
+    const diferencial = cfg.tasaVentaUSD - cfg.tasaCompraUSD;
+    let html = barraSuperior('Cambio de divisas');
+    html +=
+      '<section class="seccion"><div class="panel"><div class="datos">' +
+      '<div><small>El banco COMPRA a</small><strong>' + esc(dinero(Math.round(cfg.tasaCompraUSD * 100))) + '</strong></div>' +
+      '<div><small>El banco VENDE a</small><strong>' + esc(dinero(Math.round(cfg.tasaVentaUSD * 100))) + '</strong></div></div>' +
+      '<div class="panel-cuerpo"><div class="aviso-banner azul">' + I('info') + '<span>La diferencia entre venta y compra (<strong>' + esc(dinero(Math.round(diferencial * 100))) + '</strong> por dólar) es la ganancia del banco. Se llama <strong>diferencial cambiario</strong>.</span></div></div></div></section>';
+    html += seccion(
+      'Mis dólares',
+      '<div class="panel">' + itemDepartamento('producto', 'dolares', 'dolar', 'turquesa', 'Cuenta en dólares', '≈ ' + esc(dinero(Math.round(c.saldos.dolares * cfg.tasaCompraUSD))), esc(usd(c.saldos.dolares))) + '</div>' +
+        '<div class="botones dos" style="margin-top:14px"><button class="boton" data-accion="operar" data-valor="divisas">Comprar US$</button><button class="boton claro" data-accion="operar" data-valor="divisas-vender">Vender US$</button></div>'
+    );
+    html += seccion(
+      'Ejemplo',
+      '<div class="panel"><div class="panel-cuerpo resumen">' +
+        filaResumen('Comprar US$100 te cuesta', esc(dinero(Math.round(10000 * cfg.tasaVentaUSD)))) +
+        filaResumen('Vender US$100 te da', esc(dinero(Math.round(10000 * cfg.tasaCompraUSD)))) +
+        filaResumen('Pierdes si compras y vendes', '<span class="negativo">' + esc(dinero(Math.round(10000 * diferencial))) + '</span>', 'total') +
+        '</div></div>'
+    );
+    return html;
+  }
+
+  const CALCULADORAS = [
+    ['simple', 'Interés simple'],
+    ['compuesto', 'Interés compuesto'],
+    ['anualidad', 'Ahorro programado'],
+    ['tasas', 'Tasas equivalentes'],
+    ['prestamo', 'Préstamos'],
+  ];
+
+  function pCalculadoras() {
+    const tipo = ui.calc || 'simple';
+    let html = barraSuperior('Calculadoras financieras');
+    html +=
+      '<div class="seccion"><div class="chips-desplazables">' +
+      CALCULADORAS.map(([v, t]) => '<button data-accion="calc" data-valor="' + v + '" aria-pressed="' + (tipo === v) + '">' + t + '</button>').join('') +
+      '</div></div>';
+    html += '<section class="seccion"><div class="panel"><div class="panel-cuerpo formulario" data-calc="' + tipo + '">' + formularioCalculadora(tipo) + '<div data-resultado>' + resultadoCalculadora(tipo, valoresIniciales(tipo)) + '</div></div></div></section>';
+    return html;
+  }
+
+  function valoresIniciales(tipo) {
+    const cfg = estado.config;
+    return {
+      simple: { capital: 1000, tasa: 2, n: 6 },
+      compuesto: { capital: 1000, tasa: cfg.tasaAhorroMensual, n: 12 },
+      anualidad: { cuota: 100, tasa: cfg.tasaAhorroMensual, n: 12 },
+      tasas: { mensual: cfg.tasaTarjetaMensual, anual: 12 },
+      prestamo: { capital: 1000, tasa: cfg.tasaPrestamoMensual, n: 6 },
+    }[tipo];
+  }
+
+  function formularioCalculadora(tipo) {
+    const v = valoresIniciales(tipo);
+    const num = (n, val, paso) => '<input name="' + n + '" type="number" min="0" step="' + (paso || 'any') + '" value="' + val + '" />';
+    const formulas = {
+      simple: 'I = C · i · n &nbsp;&nbsp; M = C + I',
+      compuesto: 'M = C · (1 + i)<sup>n</sup>',
+      anualidad: 'VF = A · [(1 + i)<sup>n</sup> − 1] ÷ i',
+      tasas: 'i<sub>anual</sub> = (1 + i<sub>mensual</sub>)<sup>12</sup> − 1',
+      prestamo: 'Francés: Cuota = P · i ÷ (1 − (1 + i)<sup>−n</sup>) &nbsp;·&nbsp; Alemán: Capital = P ÷ n',
+    };
+    const campos = {
+      simple: campo('Capital (C)', num('capital', v.capital), 'dinero') + campo('Tasa mensual % (i)', num('tasa', v.tasa), 'porcentaje') + campo('Meses (n)', num('n', v.n, 1), 'calendario'),
+      compuesto: campo('Capital (C)', num('capital', v.capital), 'dinero') + campo('Tasa mensual % (i)', num('tasa', v.tasa), 'porcentaje') + campo('Meses (n)', num('n', v.n, 1), 'calendario'),
+      anualidad: campo('Depósito mensual (A)', num('cuota', v.cuota), 'dinero') + campo('Tasa mensual % (i)', num('tasa', v.tasa), 'porcentaje') + campo('Meses (n)', num('n', v.n, 1), 'calendario'),
+      tasas: campo('Tasa mensual %', num('mensual', v.mensual), 'porcentaje') + campo('Tasa anual %', num('anual', v.anual), 'porcentaje'),
+      prestamo: campo('Monto (P)', num('capital', v.capital), 'dinero') + campo('Tasa mensual % (i)', num('tasa', v.tasa), 'porcentaje') + campo('Meses (n)', num('n', v.n, 1), 'calendario'),
+    };
+    return '<p class="formula">' + formulas[tipo] + '</p><div class="fila-campos">' + campos[tipo] + '</div>';
+  }
+
+  function leerCalculadora(caja) {
+    const v = {};
+    caja.querySelectorAll('input').forEach((i) => (v[i.name] = Number(i.value)));
+    return v;
+  }
+
+  function resultadoCalculadora(tipo, v) {
+    const c = (x) => Math.round(x * 100);
+    const n = Math.max(0, Math.min(120, Math.round(v.n || 0)));
+    if (tipo === 'tasas') {
+      return (
+        '<div class="resumen">' +
+        filaResumen(v.mensual + '% mensual equivale a', B.formulas.tasaAnualEquivalente(v.mensual || 0).toFixed(2) + '% anual', 'total') +
+        filaResumen(v.anual + '% anual equivale a', B.formulas.tasaMensualEquivalente(v.anual || 0).toFixed(3) + '% mensual', 'total') +
+        filaResumen('Ojo', 'No es lo mismo 2% mensual que 24% anual: con interés compuesto da ' + B.formulas.tasaAnualEquivalente(2).toFixed(2) + '%') +
+        '</div>'
+      );
+    }
+    if (!(n >= 1)) return '<p class="ayuda">Escribe una cantidad de meses mayor que cero.</p>';
+    if (tipo === 'simple' || tipo === 'compuesto') {
+      const r = B.formulas[tipo === 'simple' ? 'interesSimple' : 'interesCompuesto'](c(v.capital), v.tasa, n);
+      const otro = B.formulas[tipo === 'simple' ? 'interesCompuesto' : 'interesSimple'](c(v.capital), v.tasa, n);
+      return (
+        '<div class="resumen">' +
+        filaResumen('Capital', esc(dinero(c(v.capital)))) +
+        filaResumen('Interés ganado', '<span class="positivo">+' + esc(dinero(r.interes)) + '</span>') +
+        filaResumen('Monto final', esc(dinero(r.monto)), 'total') +
+        filaResumen('Con interés ' + (tipo === 'simple' ? 'compuesto' : 'simple') + ' sería', esc(dinero(otro.monto))) +
+        '</div>'
+      );
+    }
+    if (tipo === 'anualidad') {
+      const r = B.formulas.anualidad(c(v.cuota), v.tasa, n);
+      return (
+        '<div class="resumen">' +
+        filaResumen('Depositaste en total', esc(dinero(r.aportado))) +
+        filaResumen('Intereses ganados', '<span class="positivo">+' + esc(dinero(r.interes)) + '</span>') +
+        filaResumen('Tendrás al final', esc(dinero(r.monto)), 'total') +
+        '</div>'
+      );
+    }
+    const capital = c(v.capital);
+    if (!(capital > 0)) return '<p class="ayuda">Escribe el monto del préstamo.</p>';
+    const fr = B.tablaAmortizacion(capital, v.tasa, n, 'frances');
+    const al = B.tablaAmortizacion(capital, v.tasa, n, 'aleman');
+    const total = (t) => t.reduce((s, f) => s + f.cuota, 0);
+    return (
+      '<div class="tabla-envoltura"><table><thead><tr><th></th><th class="num">Francés</th><th class="num">Alemán</th></tr></thead><tbody>' +
+      '<tr><td>Primera cuota</td><td class="num">' + esc(dinero(fr[0].cuota)) + '</td><td class="num">' + esc(dinero(al[0].cuota)) + '</td></tr>' +
+      '<tr><td>Última cuota</td><td class="num">' + esc(dinero(fr[n - 1].cuota)) + '</td><td class="num">' + esc(dinero(al[n - 1].cuota)) + '</td></tr>' +
+      '<tr><td>Total de intereses</td><td class="num negativo">' + esc(dinero(total(fr) - capital)) + '</td><td class="num negativo">' + esc(dinero(total(al) - capital)) + '</td></tr>' +
+      '<tr><td><strong>Total a pagar</strong></td><td class="num"><strong>' + esc(dinero(total(fr))) + '</strong></td><td class="num"><strong>' + esc(dinero(total(al))) + '</strong></td></tr>' +
+      '</tbody></table></div>' +
+      '<details class="acordeon"><summary class="enlace" style="padding:10px 0">Tabla francés</summary>' + tablaAmortizacion(fr) + '</details>' +
+      '<details class="acordeon"><summary class="enlace" style="padding:10px 0">Tabla alemán</summary>' + tablaAmortizacion(al) + '</details>'
+    );
+  }
+
+  function pTarifario() {
+    const cfg = estado.config;
+    const grupo = (titulo, icono, filas) =>
+      seccion('', '<div class="panel"><div class="tarjeta-cabeza"><div class="cabecera-fila"><span class="item-icono oro">' + I(icono) + '</span><h2>' + titulo + '</h2></div></div><div class="panel-cuerpo resumen">' + filas.map(([e, v]) => filaResumen(e, v)).join('') + '</div></div>');
+    const m = (x) => esc(dinero(x));
+    return (
+      barraSuperior('Tarifario') +
+      '<div class="paso-titulo"><h2>Tasas, comisiones e impuestos</h2><p>Esto es lo que cobra (y lo que paga) ' + esc(cfg.nombreBanco) + '. Antes de usar un producto, revisa su costo.</p></div>' +
+      grupo('Cuentas', 'tarjeta', [
+        ['Interés del ahorro', cfg.tasaAhorroMensual + '% mensual'],
+        ['Saldo mínimo en corriente', m(cfg.saldoMinimo)],
+        ['Cargo por mantenimiento', m(cfg.cargoMantenimiento) + ' al mes'],
+        ['Comisión por retiro', m(cfg.comisionRetiro)],
+        ['Comisión por transferencia', m(cfg.comisionTransferencia)],
+        ['Impuesto a transacciones', cfg.impuestoTransaccion + '% (retiros y transferencias)'],
+        ['Depósitos y pago de servicios', 'Gratis'],
+      ]) +
+      grupo('Tarjeta de crédito', 'tarjeta', [
+        ['Límite de crédito', m(cfg.limiteTarjeta)],
+        ['Tasa de interés', cfg.tasaTarjetaMensual + '% mensual'],
+        ['Pago mínimo', cfg.pagoMinimoPorcentaje + '% (mínimo ' + m(cfg.pagoMinimoFijo) + ')'],
+        ['Cargo por mora', m(cfg.cargoMoraTarjeta)],
+        ['Avance de efectivo', cfg.comisionAvance + '% de comisión'],
+        ['Cuota de emisión', m(cfg.cuotaEmisionTarjeta)],
+      ]) +
+      grupo('Préstamos', 'prestamo', [
+        ['Personal', cfg.tasaPrestamoMensual + '% mensual'],
+        ['Educativo', cfg.tasaPrestamoEducativo + '% mensual'],
+        ['Emprendimiento', cfg.tasaPrestamoEmprendimiento + '% mensual'],
+        ['Comisión de apertura', cfg.comisionApertura + '%'],
+        ['Cargo por mora', m(cfg.cargoMoraPrestamo) + ' por mes atrasado'],
+      ]) +
+      grupo('Certificados de depósito', 'escudo', [
+        ['Tasa', cfg.tasaCertificadoMensual + '% mensual'],
+        ['Monto mínimo', m(cfg.montoMinimoCertificado)],
+        ['Penalidad por cancelar antes', cfg.penalidadCertificado + '% del capital'],
+      ]) +
+      grupo('Divisas', 'globo', [
+        ['Compra de dólares (el banco compra)', m(Math.round(cfg.tasaCompraUSD * 100))],
+        ['Venta de dólares (el banco vende)', m(Math.round(cfg.tasaVentaUSD * 100))],
+      ])
+    );
   }
 
   function pMas(c) {
     const cfg = estado.config;
     const aprende = [
       ['¿Qué es el interés?', 'porcentaje', 'El <strong>interés</strong> es el precio del dinero en el tiempo. Cuando ahorras, el banco te paga interés. Cuando pides prestado, tú le pagas interés al banco.'],
-      ['Interés compuesto (ahorro)', 'alcancia', 'Cada mes ganas interés sobre tu saldo <strong>y también sobre los intereses anteriores</strong>. Fórmula: <span class="formula" style="display:block;margin-top:6px">M = C · (1 + i)<sup>n</sup></span>Ejemplo: ' + esc(dinero(100000)) + ' al ' + cfg.tasaAhorroMensual + '% por 12 meses = <strong>' + esc(dinero(B.proyeccionAhorro(100000, cfg.tasaAhorroMensual, 12)[11].saldo)) + '</strong>.'],
-      ['Cuota fija (préstamos)', 'calculadora', 'En el sistema francés pagas <strong>la misma cuota todos los meses</strong>. Al principio pagas más interés y al final más capital. <span class="formula" style="display:block;margin-top:6px">Cuota = P · i ÷ (1 − (1 + i)<sup>−n</sup>)</span>'],
+      ['Interés simple y compuesto', 'alcancia', 'Con interés <strong>simple</strong> ganas siempre sobre el capital inicial: <span class="formula" style="display:block;margin:6px 0">I = C · i · n</span>Con interés <strong>compuesto</strong> también ganas sobre los intereses anteriores: <span class="formula" style="display:block;margin-top:6px">M = C · (1 + i)<sup>n</sup></span>'],
+      ['Sistemas de amortización', 'calculadora', 'En el sistema <strong>francés</strong> pagas la misma cuota todos los meses. En el <strong>alemán</strong> abonas lo mismo a capital cada mes, así que la cuota empieza alta y baja. El alemán paga menos intereses en total.'],
+      ['La trampa del pago mínimo', 'tarjeta', 'Si solo pagas el <strong>mínimo</strong> de tu tarjeta, el resto genera ' + cfg.tasaTarjetaMensual + '% de interés al mes: ¡' + B.formulas.tasaAnualEquivalente(cfg.tasaTarjetaMensual).toFixed(0) + '% al año! Paga siempre el total del corte.'],
+      ['Comisiones e impuestos', 'lista', 'Cada transferencia y retiro tiene costo. Retirar ' + esc(dinero(10000)) + ' te cuesta ' + esc(dinero(B.sumaCargos(B.cargosDe(estado, 'retiro', 10000)))) + ' en cargos. Agrupa tus operaciones para pagar menos.'],
+      ['Diferencial cambiario', 'globo', 'El banco compra dólares más baratos de lo que los vende. Esa diferencia es su ganancia.'],
       ['Regla 50/30/20', 'grafica', 'Una forma sencilla de organizar tu dinero: <strong>50%</strong> para necesidades, <strong>30%</strong> para gustos y <strong>20%</strong> para ahorrar.'],
       ['Seguridad', 'escudo', 'Tu clave es personal. <strong>Nunca la compartas</strong>, ni siquiera con amigos. Un banco real nunca te pedirá tu clave por mensaje o llamada.'],
     ];
     let html =
       '<section class="perfil"><span class="avatar">' + iniciales(c.nombre) + '</span><div><strong style="font-size:1.1rem">' + esc(c.nombre) + '</strong><br><small>Cuenta ' + esc(c.numero) + ' · Cliente desde el mes ' + c.creadoMes + '</small></div></section>';
-    html +=
-      '<section class="seccion"><div class="seccion-titulo"><h2>Mi cuenta</h2></div><div class="panel">' +
-      '<button class="item" data-accion="ir" data-valor="movimientos"><span class="item-icono">' + I('reloj') + '</span><span class="item-texto"><strong>Historial de movimientos</strong><small>Todas tus operaciones</small></span>' + I('flecha') + '</button>' +
-      '<button class="item" data-accion="operar" data-valor="clave"><span class="item-icono">' + I('llave') + '</span><span class="item-texto"><strong>Cambiar clave</strong><small>Tu clave de 4 números</small></span>' + I('flecha') + '</button>' +
-      '<button class="item" data-accion="ocultar"><span class="item-icono">' + I(ui.ocultar ? 'ojoCerrado' : 'ojo') + '</span><span class="item-texto"><strong>' + (ui.ocultar ? 'Mostrar saldos' : 'Ocultar saldos') + '</strong><small>Privacidad en pantalla</small></span>' + I('flecha') + '</button>' +
-      '</div></section>';
-    html +=
-      '<section class="seccion"><div class="seccion-titulo"><h2>Educación financiera</h2></div><div class="panel">' +
-      aprende.map(([t, ico, txt]) => '<details class="acordeon"><summary class="item"><span class="item-icono oro">' + I(ico) + '</span><span class="item-texto"><strong>' + t + '</strong></span>' + I('flecha') + '</summary><div class="acordeon-cuerpo"><p>' + txt + '</p></div></details>').join('') +
-      '</div></section>';
-    html +=
-      '<section class="seccion"><div class="seccion-titulo"><h2>Tarifas y tasas</h2></div><div class="panel"><div class="panel-cuerpo resumen">' +
-      filaResumen('Interés del ahorro', cfg.tasaAhorroMensual + '% mensual') +
-      filaResumen('Interés de préstamos', cfg.tasaPrestamoMensual + '% mensual') +
-      filaResumen('Préstamo máximo', esc(dinero(cfg.montoMaximoPrestamo))) +
-      filaResumen('Comisión por transferencias', esc(dinero(0))) +
-      '</div></div></section>';
+    html += seccion(
+      'Mi cuenta',
+      '<div class="panel">' +
+        itemDepartamento('ir', 'movimientos', 'reloj', '', 'Historial de movimientos', 'Todas tus operaciones') +
+        itemDepartamento('operar', 'clave', 'llave', '', 'Cambiar clave', 'Tu clave de 4 números') +
+        itemDepartamento('ocultar', '', ui.ocultar ? 'ojoCerrado' : 'ojo', '', ui.ocultar ? 'Mostrar saldos' : 'Ocultar saldos', 'Privacidad en pantalla') +
+        itemDepartamento('ir', 'tarifario', 'lista', '', 'Tarifario', 'Tasas, comisiones e impuestos') +
+        itemDepartamento('ir', 'calculadoras', 'calculadora', '', 'Calculadoras financieras', 'Practica las fórmulas') +
+        '</div>'
+    );
+    html += seccion(
+      'Educación financiera',
+      '<div class="panel">' +
+        aprende.map(([t, ico, txt]) => '<details class="acordeon"><summary class="item"><span class="item-icono oro">' + I(ico) + '</span><span class="item-texto"><strong>' + t + '</strong></span>' + I('flecha') + '</summary><div class="acordeon-cuerpo"><p>' + txt + '</p></div></details>').join('') +
+        '</div>'
+    );
     html +=
       '<section class="seccion"><button class="boton borde" data-accion="salir">' + I('salir') + (ui.desdeDocente ? 'Volver al panel docente' : 'Cerrar sesión') + '</button>' +
       '<p class="ayuda" style="text-align:center;margin-top:14px">' + esc(cfg.nombreBanco) + ' · ¡Multiplica tus ideas! · Dinero didáctico, sin valor real</p></section>';
@@ -696,6 +1152,50 @@
     return monto;
   }
 
+  const COMERCIOS = [
+    ['Supermercado escolar', 'bolsa'],
+    ['Librería', 'libro'],
+    ['Cafetería', 'cubiertos'],
+    ['Tienda de tecnología', 'telefono'],
+    ['Transporte', 'bus'],
+  ];
+
+  const ICONO_PRESTAMO = { personal: 'usuario', educativo: 'libro', emprendimiento: 'estrella' };
+  const AYUDA_PRESTAMO = { personal: 'Para lo que necesites', educativo: 'Útiles, libros y cursos', emprendimiento: 'Para empezar tu negocio' };
+
+  /** Monto escrito en un campo, en centavos, o 0 si todavía no es válido. */
+  function montoSeguro(valor) {
+    try {
+      const c = B.aCentavos(valor);
+      return c > 0 ? c : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  /** Muestra los cargos que tendrá una operación mientras se escribe el monto. */
+  function vistaCargos(operacion, monto, destino) {
+    const cargos = B.cargosDe(estado, operacion, monto || 10000);
+    if (!cargos.length) return '';
+    if (!monto) return '<div class="aviso-banner azul">' + I('porcentaje') + '<span>Esta operación tiene cargos: ' + esc(cargos.map((x) => x.concepto.replace(/ \(.*\)/, '')).join(' + ')) + '.</span></div>';
+    return (
+      '<div class="panel"><div class="panel-cuerpo resumen">' +
+      cargos.map((x) => filaResumen(x.concepto, '<span class="negativo">' + esc(dinero(x.monto)) + '</span>')).join('') +
+      filaResumen('Total ' + (destino ? 'que se carga ' + destino : 'a debitar'), esc(dinero(monto + B.sumaCargos(cargos))), 'total') +
+      '</div></div>'
+    );
+  }
+
+  function radiosSegmento(nombre, opciones, actual, etiqueta) {
+    return (
+      '<div class="campo"><span>' + esc(etiqueta) + '</span><div class="segmentos">' +
+      opciones
+        .map(([v, t]) => '<span><input type="radio" id="' + nombre + '-' + v + '" name="' + nombre + '" value="' + v + '"' + (String(v) === String(actual) ? ' checked' : '') + ' /><label for="' + nombre + '-' + v + '" style="display:block">' + esc(t) + '</label></span>')
+        .join('') +
+      '</div></div>'
+    );
+  }
+
   const OPS = {
     transferencia: {
       titulo: 'Transferir',
@@ -712,29 +1212,37 @@
             .join('') +
           '</div>' +
           campoMontoGrande(d.monto, c.saldos.corriente) +
+          '<div data-preview>' + this.preview(c, d) + '</div>' +
           campo('Concepto', '<input name="concepto" maxlength="60" placeholder="Ej.: pago de merienda" value="' + esc(d.concepto || '') + '" />', 'pagos')
         );
+      },
+      preview(c, d) {
+        return vistaCargos('transferencia', montoSeguro(d.monto));
       },
       leer(c, d) {
         if (!d.destino) throw new B.ErrorBanco('Elige a quién le vas a transferir.');
         const monto = leerMonto(d);
-        exigirSaldo(monto, c.saldos.corriente);
+        const cargos = B.sumaCargos(B.cargosDe(estado, 'transferencia', monto));
+        exigirSaldo(monto + cargos, c.saldos.corriente, 'No te alcanza para enviar ' + dinero(monto) + ' y pagar ' + dinero(cargos) + ' de cargos. Disponible: ' + dinero(c.saldos.corriente) + '.');
         return { destino: d.destino, monto, concepto: (d.concepto || '').trim() };
       },
       resumen(c, d) {
         const para = B.buscarCliente(estado, d.destino);
+        const cargos = B.cargosDe(estado, 'transferencia', d.monto);
         return [
           ['Desde', 'Cuenta Corriente ' + mascara(c.numero)],
           ['Para', esc(para.nombre) + '<br><small class="ayuda">Cuenta ' + esc(para.numero) + '</small>'],
           ['Concepto', esc(d.concepto || '—')],
-          ['Comisión', esc(dinero(0))],
-          ['Total a debitar', esc(dinero(d.monto)), 'total'],
-        ];
+          ['Monto a enviar', esc(dinero(d.monto))],
+        ]
+          .concat(cargos.map((x) => [esc(x.concepto), '<span class="negativo">' + esc(dinero(x.monto)) + '</span>']))
+          .concat([['Total a debitar', esc(dinero(d.monto + B.sumaCargos(cargos))), 'total']]);
       },
       ejecutar(c, d) {
         const para = B.buscarCliente(estado, d.destino);
+        const cargos = B.sumaCargos(B.cargosDe(estado, 'transferencia', d.monto));
         B.transferir(estado, c.numero, d.destino, d.monto, d.concepto);
-        return { titulo: '¡Transferencia exitosa!', importe: d.monto, filas: [['Para', esc(para.nombre)], ['Cuenta destino', esc(para.numero)], ['Concepto', esc(d.concepto || '—')]] };
+        return { titulo: '¡Transferencia exitosa!', importe: d.monto, filas: [['Para', esc(para.nombre)], ['Cuenta destino', esc(para.numero)], ['Concepto', esc(d.concepto || '—')], ['Cargos cobrados', esc(dinero(cargos))]] };
       },
     },
 
@@ -804,19 +1312,28 @@
       titulo: 'Retirar',
       pregunta: '¿Cuánto vas a retirar?',
       datos(c, d) {
-        return campoMontoGrande(d.monto, c.saldos.corriente);
+        return campoMontoGrande(d.monto, c.saldos.corriente) + '<div data-preview>' + this.preview(c, d) + '</div>';
+      },
+      preview(c, d) {
+        return vistaCargos('retiro', montoSeguro(d.monto));
       },
       leer(c, d) {
         const monto = leerMonto(d);
-        exigirSaldo(monto, c.saldos.corriente);
+        const cargos = B.sumaCargos(B.cargosDe(estado, 'retiro', monto));
+        exigirSaldo(monto + cargos, c.saldos.corriente, 'No te alcanza para retirar ' + dinero(monto) + ' y pagar ' + dinero(cargos) + ' de cargos. Disponible: ' + dinero(c.saldos.corriente) + '.');
         return { monto };
       },
       resumen(c, d) {
-        return [['Cuenta', 'Corriente ' + mascara(c.numero)], ['Saldo después', esc(dinero(c.saldos.corriente - d.monto))], ['Monto', esc(dinero(d.monto)), 'total']];
+        const cargos = B.cargosDe(estado, 'retiro', d.monto);
+        const total = d.monto + B.sumaCargos(cargos);
+        return [['Cuenta', 'Corriente ' + mascara(c.numero)], ['Monto a retirar', esc(dinero(d.monto))]]
+          .concat(cargos.map((x) => [esc(x.concepto), '<span class="negativo">' + esc(dinero(x.monto)) + '</span>']))
+          .concat([['Saldo después', esc(dinero(c.saldos.corriente - total))], ['Total a debitar', esc(dinero(total)), 'total']]);
       },
       ejecutar(c, d) {
-        B.retirar(estado, c.numero, d.monto);
-        return { titulo: '¡Retiro exitoso!', importe: d.monto, nota: 'Recibe tus billetes didácticos con el cajero del aula.', filas: [['Nuevo saldo', esc(dinero(c.saldos.corriente))]] };
+        const cargos = B.sumaCargos(B.cargosDe(estado, 'retiro', d.monto));
+        B.retirar(estado, c.numero, d.monto, null, true);
+        return { titulo: '¡Retiro exitoso!', importe: d.monto, nota: 'Recibe tus billetes didácticos con el cajero del aula.', filas: [['Cargos cobrados', esc(dinero(cargos))], ['Nuevo saldo', esc(dinero(c.saldos.corriente))]] };
       },
     },
 
@@ -863,19 +1380,20 @@
           filaResumen('Abono a capital', esc(dinero(fila.capital))) +
           filaResumen('Interés', esc(dinero(fila.interes))) +
           filaResumen('Estado', r.cuotasAtrasadas ? '<span class="etiqueta rojo">' + r.cuotasAtrasadas + ' atrasada(s)</span>' : '<span class="etiqueta verde">Al día</span>') +
-          filaResumen('Total de la cuota', esc(dinero(fila.cuota)), 'total') +
+          (r.mora ? filaResumen('Cargo por mora', '<span class="negativo">' + esc(dinero(r.mora)) + '</span>') : '') +
+          filaResumen('Total a pagar', esc(dinero(r.proximoPago)), 'total') +
           '</div></div><p class="disponible">Disponible en tu cuenta corriente: <strong>' + esc(dinero(c.saldos.corriente)) + '</strong></p>'
         );
       },
       leer(c, d) {
         const p = c.prestamos.find((x) => x.id === d.prestamo);
         if (!p) throw new B.ErrorBanco('No tienes préstamos por pagar.');
-        exigirSaldo(B.resumenPrestamo(p).proximaCuota, c.saldos.corriente);
-        return { prestamo: p.id, monto: B.resumenPrestamo(p).proximaCuota };
+        exigirSaldo(B.resumenPrestamo(p).proximoPago, c.saldos.corriente);
+        return { prestamo: p.id, monto: B.resumenPrestamo(p).proximoPago };
       },
       resumen(c, d) {
         const p = c.prestamos.find((x) => x.id === d.prestamo);
-        return [['Préstamo', 'Personal · ' + esc(dinero(p.monto))], ['Cuota', (p.cuotasPagadas + 1) + ' de ' + p.plazo], ['Desde', 'Cuenta Corriente ' + mascara(c.numero)], ['Total a pagar', esc(dinero(d.monto)), 'total']];
+        return [['Préstamo', esc(nombreTipo(p.tipo)) + ' · ' + esc(dinero(p.monto))], ['Cuota', (p.cuotasPagadas + 1) + ' de ' + p.plazo], ['Desde', 'Cuenta Corriente ' + mascara(c.numero)], ['Total a pagar', esc(dinero(d.monto)), 'total']];
       },
       ejecutar(c, d) {
         const p = c.prestamos.find((x) => x.id === d.prestamo);
@@ -891,22 +1409,38 @@
 
     solicitud: {
       titulo: 'Solicitar préstamo',
-      pregunta: '¿Cuánto dinero necesitas?',
+      pregunta: '¿Qué préstamo necesitas?',
       datos(c, d) {
         const cfg = estado.config;
         const r = resumenCliente(c);
         if (r.activos.length) return '<div class="vacio">' + I('info') + '<p>Primero debes terminar de pagar tu préstamo actual.</p></div>';
         if (r.solicitud) return '<div class="vacio">' + I('reloj') + '<p>Ya tienes una solicitud esperando respuesta de tu docente.</p></div>';
-        const plazo = Number(d.plazo) || cfg.plazosPrestamo[Math.min(1, cfg.plazosPrestamo.length - 1)];
+        const v = this.valores(d);
         return (
+          '<div class="opciones">' +
+          Object.keys(B.TIPOS_PRESTAMO)
+            .map((t) => opcion('tipo', t, v.tipo === t, '<span class="item-icono morado">' + I(ICONO_PRESTAMO[t]) + '</span><span class="item-texto"><strong>' + esc(B.TIPOS_PRESTAMO[t].nombre) + '</strong><small>' + esc(AYUDA_PRESTAMO[t]) + '</small></span><span class="item-monto">' + B.tasaDeTipo(estado, t) + '%<small>mensual</small></span>'))
+            .join('') +
+          '</div>' +
           campoMontoGrande(d.monto) +
-          '<p class="disponible">Máximo: <strong>' + esc(dinero(cfg.montoMaximoPrestamo)) + '</strong> · Tasa ' + cfg.tasaPrestamoMensual + '% mensual</p>' +
-          '<div class="campo"><span>Plazo</span><div class="segmentos">' +
-          cfg.plazosPrestamo.map((p) => '<span><input type="radio" id="plazo-' + p + '" name="plazo" value="' + p + '"' + (p === plazo ? ' checked' : '') + ' /><label for="plazo-' + p + '" style="display:block">' + p + ' meses</label></span>').join('') +
-          '</div></div>' +
-          '<div data-preview="prestamo">' + vistaPreviaPrestamo(d.monto ? B.aCentavos(d.monto) : 0, plazo) + '</div>' +
+          '<p class="disponible">Máximo: <strong>' + esc(dinero(cfg.montoMaximoPrestamo)) + '</strong> · Comisión de apertura ' + cfg.comisionApertura + '%</p>' +
+          radiosSegmento('plazo', cfg.plazosPrestamo.map((p) => [p, p + ' meses']), v.plazo, 'Plazo') +
+          radiosSegmento('sistema', [['frances', 'Francés: cuota fija'], ['aleman', 'Alemán: cuota baja']], v.sistema, 'Sistema de amortización') +
+          '<div data-preview>' + this.preview(c, d) + '</div>' +
           campo('¿Para qué lo necesitas?', '<input name="motivo" maxlength="80" placeholder="Ej.: materiales para mi proyecto" value="' + esc(d.motivo || '') + '" />', 'info')
         );
+      },
+      valores(d) {
+        const cfg = estado.config;
+        return {
+          tipo: B.TIPOS_PRESTAMO[d.tipo] ? d.tipo : 'personal',
+          plazo: Number(d.plazo) || cfg.plazosPrestamo[Math.min(1, cfg.plazosPrestamo.length - 1)],
+          sistema: d.sistema === 'aleman' ? 'aleman' : 'frances',
+        };
+      },
+      preview(c, d) {
+        const v = this.valores(d);
+        return vistaPreviaPrestamo(montoSeguro(d.monto), v.plazo, B.tasaDeTipo(estado, v.tipo), v.sistema);
       },
       leer(c, d) {
         const r = resumenCliente(c);
@@ -914,29 +1448,291 @@
         if (r.solicitud) throw new B.ErrorBanco('Ya tienes una solicitud esperando respuesta.');
         const monto = leerMonto(d);
         if (monto > estado.config.montoMaximoPrestamo) throw new B.ErrorBanco('El monto máximo es ' + dinero(estado.config.montoMaximoPrestamo) + '.');
-        return { monto, plazo: Number(d.plazo), motivo: (d.motivo || '').trim() };
+        return Object.assign(this.valores(d), { monto, motivo: (d.motivo || '').trim() });
       },
       resumen(c, d) {
-        const tabla = B.tablaAmortizacion(d.monto, estado.config.tasaPrestamoMensual, d.plazo);
+        const tasa = B.tasaDeTipo(estado, d.tipo);
+        const tabla = B.tablaAmortizacion(d.monto, tasa, d.plazo, d.sistema);
         const total = tabla.reduce((s, f) => s + f.cuota, 0);
+        const apertura = B.sumaCargos(B.cargosDe(estado, 'apertura-prestamo', d.monto));
         return [
+          ['Tipo', 'Préstamo ' + esc(nombreTipo(d.tipo).toLowerCase())],
           ['Monto solicitado', esc(dinero(d.monto))],
-          ['Plazo', d.plazo + ' meses'],
-          ['Tasa', estado.config.tasaPrestamoMensual + '% mensual'],
+          ['Plazo y tasa', d.plazo + ' meses al ' + tasa + '% mensual'],
+          ['Sistema', esc(B.SISTEMAS[d.sistema])],
+          ['Comisión de apertura', '<span class="negativo">' + esc(dinero(apertura)) + '</span>'],
+          ['Recibirás en tu cuenta', esc(dinero(d.monto - apertura))],
           ['Total de intereses', '<span class="negativo">' + esc(dinero(total - d.monto)) + '</span>'],
           ['Total a pagar', esc(dinero(total))],
-          ['Cuota mensual', esc(dinero(tabla[0].cuota)), 'total'],
+          [d.sistema === 'aleman' ? 'Primera cuota' : 'Cuota mensual', esc(dinero(tabla[0].cuota)), 'total'],
         ];
       },
       ejecutar(c, d) {
-        B.solicitarPrestamo(estado, c.numero, d.monto, d.plazo, d.motivo);
+        B.solicitarPrestamo(estado, c.numero, d.monto, d.plazo, d.motivo, d.tipo, d.sistema);
         return {
           titulo: '¡Solicitud enviada!',
           azul: true,
           importe: d.monto,
-          nota: 'Tu docente revisará la solicitud. Cuando la apruebe, el dinero llegará a tu cuenta corriente.',
-          filas: [['Plazo', d.plazo + ' meses'], ['Motivo', esc(d.motivo || '—')]],
+          nota: 'Tu docente revisará la solicitud. Cuando la apruebe, el dinero llegará a tu cuenta corriente (menos la comisión de apertura).',
+          filas: [['Tipo', esc(nombreTipo(d.tipo))], ['Plazo', d.plazo + ' meses'], ['Sistema', esc(B.SISTEMAS[d.sistema])], ['Motivo', esc(d.motivo || '—')]],
           sinReferencia: true,
+          volverA: 'prestamos',
+        };
+      },
+    },
+
+    'activar-tarjeta': {
+      titulo: 'Solicitar tarjeta',
+      pregunta: 'Revisa las condiciones de tu tarjeta',
+      datos(c) {
+        const cfg = estado.config;
+        if (c.tarjeta) return '<div class="vacio">' + I('check') + '<p>Ya tienes una tarjeta de crédito activa.</p></div>';
+        return (
+          tarjetaVisual(c) +
+          '<div class="panel" style="margin-top:16px"><div class="panel-cuerpo resumen">' +
+          filaResumen('Límite de crédito', esc(dinero(cfg.limiteTarjeta))) +
+          filaResumen('Tasa de interés', cfg.tasaTarjetaMensual + '% mensual') +
+          filaResumen('Pago mínimo', cfg.pagoMinimoPorcentaje + '% del saldo (mínimo ' + esc(dinero(cfg.pagoMinimoFijo)) + ')') +
+          filaResumen('Cargo por mora', esc(dinero(cfg.cargoMoraTarjeta))) +
+          filaResumen('Cuota de emisión', esc(dinero(cfg.cuotaEmisionTarjeta))) +
+          '</div></div>' +
+          '<label class="casilla"><input type="checkbox" name="acepto" value="si" /> <span>Entiendo que la tarjeta es un préstamo: lo que compro lo debo pagar.</span></label>'
+        );
+      },
+      leer(c, d) {
+        if (c.tarjeta) throw new B.ErrorBanco('Ya tienes una tarjeta de crédito activa.');
+        if (d.acepto !== 'si') throw new B.ErrorBanco('Marca la casilla para aceptar las condiciones.');
+        return {};
+      },
+      resumen() {
+        const cfg = estado.config;
+        return [['Producto', 'Tarjeta de crédito ' + esc(cfg.nombreBanco)], ['Límite', esc(dinero(cfg.limiteTarjeta))], ['Tasa', cfg.tasaTarjetaMensual + '% mensual'], ['Cuota de emisión (se carga a la tarjeta)', esc(dinero(cfg.cuotaEmisionTarjeta)), 'total']];
+      },
+      ejecutar(c) {
+        const t = B.activarTarjeta(estado, c.numero);
+        return { titulo: '¡Tu tarjeta está activa!', azul: true, filas: [['Número', esc(t.numero)], ['Límite', esc(dinero(t.limite))], ['Disponible', esc(dinero(B.resumenTarjeta(c).disponible))]], nota: 'Tu primer estado de cuenta llegará cuando tu docente cierre el mes.', volverA: 'producto' };
+      },
+    },
+
+    compra: {
+      titulo: 'Comprar con tarjeta',
+      pregunta: '¿Dónde vas a comprar?',
+      datos(c, d) {
+        const r = B.resumenTarjeta(c);
+        if (!r) return '<div class="vacio">' + I('tarjeta') + '<p>Primero solicita tu tarjeta de crédito.</p></div>';
+        const elegido = d.comercio || COMERCIOS[0][0];
+        return (
+          '<div class="opciones">' + COMERCIOS.map(([n, ico]) => opcion('comercio', n, elegido === n, '<span class="item-icono oro">' + I(ico) + '</span><span class="item-texto"><strong>' + esc(n) + '</strong></span>')).join('') + '</div>' +
+          campoMontoGrande(d.monto, r.disponible) +
+          '<div class="aviso-banner azul">' + I('info') + '<span>Lo que compras con la tarjeta lo pagas después. Si pagas el total al corte, no pagas intereses.</span></div>'
+        );
+      },
+      leer(c, d) {
+        const r = B.resumenTarjeta(c);
+        if (!r) throw new B.ErrorBanco('Primero solicita tu tarjeta de crédito.');
+        const monto = leerMonto(d);
+        exigirSaldo(monto, r.disponible, 'La compra supera tu crédito disponible (' + dinero(r.disponible) + ').');
+        return { comercio: d.comercio || COMERCIOS[0][0], monto };
+      },
+      resumen(c, d) {
+        const r = B.resumenTarjeta(c);
+        return [['Comercio', esc(d.comercio)], ['Tarjeta', '•••• ' + esc(c.tarjeta.numero.slice(-4))], ['Disponible después', esc(dinero(r.disponible - d.monto))], ['Total de la compra', esc(dinero(d.monto)), 'total']];
+      },
+      ejecutar(c, d) {
+        B.comprarConTarjeta(estado, c.numero, d.monto, d.comercio);
+        const r = B.resumenTarjeta(c);
+        return { titulo: '¡Compra aprobada!', importe: d.monto, filas: [['Comercio', esc(d.comercio)], ['Deuda de la tarjeta', esc(dinero(r.deuda))], ['Disponible', esc(dinero(r.disponible))]], volverA: 'producto' };
+      },
+    },
+
+    avance: {
+      titulo: 'Avance de efectivo',
+      pregunta: '¿Cuánto efectivo necesitas?',
+      datos(c, d) {
+        const r = B.resumenTarjeta(c);
+        if (!r) return '<div class="vacio">' + I('tarjeta') + '<p>Primero solicita tu tarjeta de crédito.</p></div>';
+        return (
+          campoMontoGrande(d.monto, r.disponible) +
+          '<div data-preview>' + this.preview(c, d) + '</div>' +
+          '<div class="aviso-banner">' + I('alerta') + '<span>El avance es el uso más caro de la tarjeta: pagas una comisión de ' + estado.config.comisionAvance + '% en el momento, además de los intereses.</span></div>'
+        );
+      },
+      preview(c, d) {
+        return vistaCargos('avance', montoSeguro(d.monto), 'a la tarjeta');
+      },
+      leer(c, d) {
+        const r = B.resumenTarjeta(c);
+        if (!r) throw new B.ErrorBanco('Primero solicita tu tarjeta de crédito.');
+        const monto = leerMonto(d);
+        const cargos = B.sumaCargos(B.cargosDe(estado, 'avance', monto));
+        exigirSaldo(monto + cargos, r.disponible, 'El avance y su comisión superan tu crédito disponible (' + dinero(r.disponible) + ').');
+        return { monto };
+      },
+      resumen(c, d) {
+        const cargos = B.cargosDe(estado, 'avance', d.monto);
+        return [['Recibes en tu cuenta corriente', esc(dinero(d.monto))]]
+          .concat(cargos.map((x) => [esc(x.concepto), '<span class="negativo">' + esc(dinero(x.monto)) + '</span>']))
+          .concat([['Se suma a tu deuda', esc(dinero(d.monto + B.sumaCargos(cargos))), 'total']]);
+      },
+      ejecutar(c, d) {
+        B.avanceEfectivo(estado, c.numero, d.monto);
+        const r = B.resumenTarjeta(c);
+        return { titulo: '¡Avance listo!', importe: d.monto, filas: [['Nuevo saldo corriente', esc(dinero(c.saldos.corriente))], ['Deuda de la tarjeta', esc(dinero(r.deuda))]], volverA: 'producto' };
+      },
+    },
+
+    'pago-tarjeta': {
+      titulo: 'Pagar tarjeta',
+      pregunta: '¿Cuánto vas a pagar?',
+      datos(c, d) {
+        const r = B.resumenTarjeta(c);
+        if (!r) return '<div class="vacio">' + I('tarjeta') + '<p>Primero solicita tu tarjeta de crédito.</p></div>';
+        if (!r.deuda) return '<div class="vacio">' + I('check') + '<p>Tu tarjeta no tiene deuda. ¡Muy bien!</p></div>';
+        const opciones = [
+          ['minimo', 'Pago mínimo', r.minimoPendiente, 'Evitas la mora, pero pagas intereses sobre el resto'],
+          ['corte', 'Saldo al corte', r.cortePendiente, 'No pagas intereses este mes'],
+          ['total', 'Deuda total', r.deuda, 'Dejas la tarjeta en cero'],
+        ].filter((o) => o[2] > 0);
+        const elegido = d.opcion || (opciones[0] ? opciones[0][0] : 'otro');
+        return (
+          '<div class="opciones">' +
+          opciones.map(([v, t, m, ayuda]) => opcion('opcion', v, elegido === v, '<span class="item-texto"><strong>' + t + '</strong><small>' + ayuda + '</small></span><span class="item-monto">' + esc(dinero(m)) + '</span>')).join('') +
+          opcion('opcion', 'otro', elegido === 'otro', '<span class="item-texto"><strong>Otro monto</strong><small>Escríbelo abajo</small></span>') +
+          '</div>' +
+          campoMontoGrande(d.monto, c.saldos.corriente).replace(' required', '')
+        );
+      },
+      leer(c, d) {
+        const r = B.resumenTarjeta(c);
+        if (!r || !r.deuda) throw new B.ErrorBanco('Tu tarjeta no tiene deuda.');
+        const fijo = { minimo: r.minimoPendiente, corte: r.cortePendiente, total: r.deuda }[d.opcion];
+        const monto = d.opcion && d.opcion !== 'otro' && fijo > 0 ? fijo : leerMonto(d);
+        if (monto > r.deuda) throw new B.ErrorBanco('Estás pagando más de lo que debes (' + dinero(r.deuda) + ').');
+        exigirSaldo(monto, c.saldos.corriente);
+        return { opcion: d.opcion, monto };
+      },
+      resumen(c, d) {
+        const r = B.resumenTarjeta(c);
+        return [['Desde', 'Cuenta Corriente ' + mascara(c.numero)], ['Tarjeta', '•••• ' + esc(c.tarjeta.numero.slice(-4))], ['Deuda después del pago', esc(dinero(r.deuda - d.monto))], ['Total a pagar', esc(dinero(d.monto)), 'total']];
+      },
+      ejecutar(c, d) {
+        B.pagarTarjeta(estado, c.numero, d.monto);
+        const r = B.resumenTarjeta(c);
+        return {
+          titulo: '¡Pago recibido!',
+          importe: d.monto,
+          filas: [['Deuda de la tarjeta', esc(dinero(r.deuda))], ['Disponible', esc(dinero(r.disponible))]],
+          nota: r.minimoPendiente > 0 ? 'Todavía te falta ' + dinero(r.minimoPendiente) + ' para cubrir el pago mínimo.' : r.saldoCorte > 0 && r.cortePendiente === 0 ? 'Pagaste todo el saldo al corte: este mes no pagarás intereses.' : null,
+          volverA: 'producto',
+        };
+      },
+    },
+
+    certificado: {
+      titulo: 'Abrir certificado',
+      pregunta: '¿Cuánto quieres invertir?',
+      datos(c, d) {
+        const cfg = estado.config;
+        const plazo = Number(d.plazo) || cfg.plazosCertificado[Math.min(1, cfg.plazosCertificado.length - 1)];
+        const tipo = d.tipo || 'compuesto';
+        return (
+          campoMontoGrande(d.monto, c.saldos.corriente) +
+          '<p class="disponible">Mínimo: <strong>' + esc(dinero(cfg.montoMinimoCertificado)) + '</strong> · Tasa ' + cfg.tasaCertificadoMensual + '% mensual</p>' +
+          radiosSegmento('plazo', cfg.plazosCertificado.map((p) => [p, p + ' meses']), plazo, 'Plazo') +
+          radiosSegmento('tipo', [['simple', 'Interés simple'], ['compuesto', 'Interés compuesto']], tipo, 'Tipo de interés') +
+          '<div data-preview>' + this.preview(c, d) + '</div>'
+        );
+      },
+      preview(c, d) {
+        const cfg = estado.config;
+        const monto = montoSeguro(d.monto);
+        const plazo = Number(d.plazo) || cfg.plazosCertificado[Math.min(1, cfg.plazosCertificado.length - 1)];
+        if (!(monto > 0)) return '<div class="aviso-banner azul">' + I('calculadora') + '<span>Escribe un monto para ver cuánto ganarás.</span></div>';
+        const s = B.proyeccionCertificado(monto, cfg.tasaCertificadoMensual, plazo, 'simple');
+        const k = B.proyeccionCertificado(monto, cfg.tasaCertificadoMensual, plazo, 'compuesto');
+        return (
+          '<div class="panel"><div class="tabla-envoltura"><table><thead><tr><th></th><th class="num">Simple</th><th class="num">Compuesto</th></tr></thead><tbody>' +
+          '<tr><td>Intereses</td><td class="num positivo">' + esc(dinero(s.interes)) + '</td><td class="num positivo">' + esc(dinero(k.interes)) + '</td></tr>' +
+          '<tr><td><strong>Recibirás</strong></td><td class="num"><strong>' + esc(dinero(s.final)) + '</strong></td><td class="num"><strong>' + esc(dinero(k.final)) + '</strong></td></tr>' +
+          '</tbody></table></div></div>'
+        );
+      },
+      leer(c, d) {
+        const cfg = estado.config;
+        const monto = leerMonto(d);
+        if (monto < cfg.montoMinimoCertificado) throw new B.ErrorBanco('El monto mínimo es ' + dinero(cfg.montoMinimoCertificado) + '.');
+        exigirSaldo(monto, c.saldos.corriente);
+        return { monto, plazo: Number(d.plazo), tipo: d.tipo === 'simple' ? 'simple' : 'compuesto' };
+      },
+      resumen(c, d) {
+        const cfg = estado.config;
+        const p = B.proyeccionCertificado(d.monto, cfg.tasaCertificadoMensual, d.plazo, d.tipo);
+        return [
+          ['Desde', 'Cuenta Corriente ' + mascara(c.numero)],
+          ['Plazo', d.plazo + ' meses'],
+          ['Tasa', cfg.tasaCertificadoMensual + '% mensual · interés ' + d.tipo],
+          ['Intereses al vencer', '<span class="positivo">' + esc(dinero(p.interes)) + '</span>'],
+          ['Recibirás al vencer', esc(dinero(p.final))],
+          ['Monto a invertir', esc(dinero(d.monto)), 'total'],
+        ];
+      },
+      ejecutar(c, d) {
+        const cert = B.abrirCertificado(estado, c.numero, d.monto, d.plazo, d.tipo);
+        return {
+          titulo: '¡Certificado abierto!',
+          importe: d.monto,
+          filas: [['Plazo', d.plazo + ' meses'], ['Vence al cerrar el mes', String(cert.mesInicio + cert.plazo - 1)], ['Recibirás', esc(dinero(B.proyeccionCertificado(d.monto, cert.tasa, d.plazo, d.tipo).final))]],
+          nota: 'Si lo cancelas antes de tiempo pierdes los intereses y pagas una penalidad de ' + estado.config.penalidadCertificado + '%.',
+          volverA: 'certificados',
+        };
+      },
+    },
+
+    divisas: {
+      titulo: 'Cambio de dólares',
+      pregunta: '¿Cuántos dólares?',
+      datos(c, d) {
+        const op = d.operacion || ui.op.inicial || 'comprar';
+        return (
+          '<div class="segmentos">' +
+          '<span><input type="radio" id="div-comprar" name="operacion" value="comprar"' + (op === 'comprar' ? ' checked' : '') + ' /><label for="div-comprar" style="display:block">Comprar US$</label></span>' +
+          '<span><input type="radio" id="div-vender" name="operacion" value="vender"' + (op === 'vender' ? ' checked' : '') + ' /><label for="div-vender" style="display:block">Vender US$</label></span></div>' +
+          campoMontoGrande(d.monto, null, B.SIMBOLO_USD) +
+          '<p class="disponible">Tienes <strong>' + esc(usd(c.saldos.dolares)) + '</strong> y <strong>' + esc(dinero(c.saldos.corriente)) + '</strong> en corriente</p>' +
+          '<div data-preview>' + this.preview(c, d) + '</div>'
+        );
+      },
+      preview(c, d) {
+        const op = d.operacion || ui.op.inicial || 'comprar';
+        const cant = montoSeguro(d.monto);
+        if (!(cant > 0)) return '<div class="aviso-banner azul">' + I('globo') + '<span>Compra: ' + esc(dinero(Math.round(estado.config.tasaVentaUSD * 100))) + ' por dólar · Venta: ' + esc(dinero(Math.round(estado.config.tasaCompraUSD * 100))) + ' por dólar.</span></div>';
+        const q = B.cotizarDivisa(estado, op, cant);
+        return '<div class="panel"><div class="panel-cuerpo resumen">' + filaResumen('Tasa', esc(dinero(Math.round(q.tasa * 100))) + ' por dólar') + filaResumen(op === 'comprar' ? 'Pagarás' : 'Recibirás', esc(dinero(q.pesos)), 'total') + '</div></div>';
+      },
+      leer(c, d) {
+        const op = d.operacion === 'vender' ? 'vender' : 'comprar';
+        const cant = leerMonto(d);
+        const q = B.cotizarDivisa(estado, op, cant);
+        if (op === 'comprar') exigirSaldo(q.pesos, c.saldos.corriente, 'Necesitas ' + dinero(q.pesos) + ' en tu cuenta corriente.');
+        else exigirSaldo(cant, c.saldos.dolares, 'No tienes suficientes dólares. Tienes ' + usd(c.saldos.dolares) + '.');
+        return { operacion: op, monto: cant };
+      },
+      resumen(c, d) {
+        const q = B.cotizarDivisa(estado, d.operacion, d.monto);
+        const compra = d.operacion === 'comprar';
+        return [
+          ['Operación', compra ? 'Compra de dólares' : 'Venta de dólares'],
+          ['Dólares', esc(usd(d.monto))],
+          ['Tasa', esc(dinero(Math.round(q.tasa * 100))) + ' por dólar'],
+          [compra ? 'Se debita de tu corriente' : 'Se acredita a tu corriente', esc(dinero(q.pesos)), 'total'],
+        ];
+      },
+      ejecutar(c, d) {
+        const q = d.operacion === 'comprar' ? B.comprarDolares(estado, c.numero, d.monto) : B.venderDolares(estado, c.numero, d.monto);
+        return {
+          titulo: d.operacion === 'comprar' ? '¡Compraste dólares!' : '¡Vendiste dólares!',
+          importe: q.pesos,
+          filas: [['Dólares', esc(usd(d.monto))], ['Tasa', esc(dinero(Math.round(q.tasa * 100)))], ['Saldo en dólares', esc(usd(c.saldos.dolares))], ['Saldo corriente', esc(dinero(c.saldos.corriente))]],
         };
       },
     },
@@ -975,17 +1771,16 @@
     );
   }
 
-  function vistaPreviaPrestamo(monto, plazo) {
-    const cfg = estado.config;
+  function vistaPreviaPrestamo(monto, plazo, tasa, sistema) {
     if (!(monto > 0) || !plazo) return '<div class="aviso-banner azul">' + I('calculadora') + '<span>Escribe un monto para ver tu cuota mensual.</span></div>';
-    const tabla = B.tablaAmortizacion(monto, cfg.tasaPrestamoMensual, plazo);
+    const tabla = B.tablaAmortizacion(monto, tasa, plazo, sistema);
     const total = tabla.reduce((s, f) => s + f.cuota, 0);
     return (
       '<div class="panel"><div class="datos">' +
-      '<div><small>Cuota mensual</small><strong>' + esc(dinero(tabla[0].cuota)) + '</strong></div>' +
-      '<div><small>Total a pagar</small><strong>' + esc(dinero(total)) + '</strong></div>' +
+      '<div><small>' + (sistema === 'aleman' ? 'Primera cuota' : 'Cuota mensual') + '</small><strong>' + esc(dinero(tabla[0].cuota)) + '</strong></div>' +
+      '<div><small>' + (sistema === 'aleman' ? 'Última cuota' : 'Total a pagar') + '</small><strong>' + esc(dinero(sistema === 'aleman' ? tabla[tabla.length - 1].cuota : total)) + '</strong></div>' +
       '<div><small>Intereses</small><strong class="negativo">' + esc(dinero(total - monto)) + '</strong></div>' +
-      '<div><small>Plazo</small><strong>' + plazo + ' meses</strong></div></div>' +
+      '<div><small>Comisión de apertura</small><strong class="negativo">' + esc(dinero(B.sumaCargos(B.cargosDe(estado, 'apertura-prestamo', monto)))) + '</strong></div></div>' +
       '<details class="acordeon"><summary class="enlace" style="padding:12px 16px">Ver tabla de amortización</summary>' + tablaAmortizacion(tabla) + '</details></div>'
     );
   }
@@ -1029,7 +1824,7 @@
         '</div>' +
         '<div class="seccion botones no-imprimir">' +
         (r.sinReferencia ? '' : '<button class="boton borde" data-accion="imprimir">' + I('imprimir') + 'Imprimir comprobante</button>') +
-        '<button class="boton" data-accion="terminar-op">Volver al inicio</button></div>';
+        '<button class="boton" data-accion="terminar-op">' + (r.volverA ? 'Listo' : 'Volver al inicio') + '</button></div>';
     }
     return html;
   }
@@ -1038,6 +1833,10 @@
     if (tipo === 'mover-sacar') {
       tipo = 'mover';
       inicial = 'sacar';
+    }
+    if (tipo === 'divisas-vender') {
+      tipo = 'divisas';
+      inicial = 'vender';
     }
     ui.op = { tipo, paso: 'datos', datos: {}, inicial, volver: ui.pantalla };
     pintar(true);
@@ -1082,6 +1881,7 @@
 
   function dResumen() {
     const t = B.totales(estado);
+    const ing = B.ingresosBanco(estado);
     let html = cabezaEscritorio('Resumen del banco', 'Mes ' + estado.mes + ' · ' + t.clientes + ' cliente(s)', '<button class="boton chico" data-accion="seccion" data-valor="mes">' + I('calendario') + 'Cerrar el mes ' + estado.mes + '</button>');
     html +=
       '<div class="kpis">' +
@@ -1089,15 +1889,20 @@
       kpi('tarjeta', 'verde', 'En cuentas corrientes', esc(dinero(t.corriente))) +
       kpi('alcancia', 'turquesa', 'Ahorrado', esc(dinero(t.ahorro))) +
       kpi('prestamo', 'morado', 'Préstamos por cobrar', esc(dinero(t.deuda))) +
+      kpi('tarjeta', '', 'Tarjetas por cobrar', esc(dinero(t.tarjetas))) +
+      kpi('escudo', 'verde', 'En certificados', esc(dinero(t.certificados))) +
+      kpi('dolar', 'turquesa', 'Dólares de clientes', esc(usd(t.dolares))) +
+      kpi('grafica', 'oro', 'Ganancias del banco', esc(dinero(ing.total))) +
       '</div>';
 
     const atencion = [];
     estado.solicitudes.forEach((s) => {
       const c = estado.clientes.find((x) => x.numero === s.numero);
-      atencion.push('<button class="item" data-accion="seccion" data-valor="solicitudes"><span class="item-icono oro">' + I('prestamo') + '</span><span class="item-texto"><strong>' + esc(c ? c.nombre : s.numero) + ' pide un préstamo</strong><small>' + esc(dinero(s.monto)) + ' a ' + s.plazo + ' meses</small></span>' + I('flecha') + '</button>');
+      atencion.push('<button class="item" data-accion="seccion" data-valor="solicitudes"><span class="item-icono oro">' + I('prestamo') + '</span><span class="item-texto"><strong>' + esc(c ? c.nombre : s.numero) + ' pide un préstamo ' + esc(nombreTipo(s.tipo).toLowerCase()) + '</strong><small>' + esc(dinero(s.monto)) + ' a ' + s.plazo + ' meses</small></span>' + I('flecha') + '</button>');
     });
     estado.clientes.forEach((c) => {
       const r = resumenCliente(c);
+      if (r.tarjetaMora) atencion.push('<button class="item" data-accion="ver-cliente" data-valor="' + esc(c.numero) + '"><span class="item-icono rojo">' + I('tarjeta') + '</span><span class="item-texto"><strong>' + esc(c.nombre) + '</strong><small>No cubrió el pago mínimo de su tarjeta</small></span>' + I('flecha') + '</button>');
       if (r.atrasadas) atencion.push('<button class="item" data-accion="ver-cliente" data-valor="' + esc(c.numero) + '"><span class="item-icono rojo">' + I('alerta') + '</span><span class="item-texto"><strong>' + esc(c.nombre) + '</strong><small>' + r.atrasadas + ' cuota(s) atrasada(s)</small></span>' + I('flecha') + '</button>');
     });
 
@@ -1112,6 +1917,14 @@
       '<section class="tarjeta"><div class="tarjeta-cabeza"><h2>Requiere atención</h2></div>' +
       (atencion.length ? '<div class="lista">' + atencion.join('') + '</div>' : '<div class="vacio">' + I('check') + '<p>Todo al día.</p></div>') +
       '</section>' +
+      '<section class="tarjeta"><div class="tarjeta-cabeza"><h2>¿Cómo gana dinero el banco?</h2><button class="boton chico claro" data-accion="seccion" data-valor="ajustes">' + I('ajustes') + 'Tarifas</button></div><div class="tarjeta-cuerpo resumen">' +
+      filaResumen('Comisiones (retiros, transferencias, apertura, avances…)', esc(dinero(ing.comisiones))) +
+      filaResumen('Impuesto a las transacciones (' + estado.config.impuestoTransaccion + '%)', esc(dinero(ing.impuestos))) +
+      filaResumen('Cargos por mora', esc(dinero(ing.moras))) +
+      filaResumen('Intereses de tarjetas', esc(dinero(ing.interesesTarjeta))) +
+      filaResumen('Intereses de préstamos cobrados', esc(dinero(ing.interesesPrestamos))) +
+      filaResumen('Total', esc(dinero(ing.total)), 'total') +
+      '</div></section>' +
       '<section class="tarjeta"><div class="tarjeta-cabeza"><h2>Mejores ahorradores</h2></div>' +
       (ranking.length
         ? '<div class="lista">' + ranking.map((c, i) => '<div class="item"><span class="avatar chico' + (i ? ' azul' : '') + '">' + (i + 1) + '</span><span class="item-texto"><strong>' + esc(c.nombre) + '</strong><small>' + esc(c.numero) + '</small></span><span class="item-monto positivo">' + esc(dinero(c.saldos.ahorro)) + '</span></div>').join('') + '</div>'
@@ -1166,7 +1979,11 @@
         '<button class="boton chico borde" data-accion="cerrar-detalle">' + I('cerrar') + '</button></div></div>' +
         '<div class="datos" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">' +
         '<div><small>Corriente</small><strong>' + esc(dinero(sel.saldos.corriente)) + '</strong></div><div><small>Ahorro</small><strong>' + esc(dinero(sel.saldos.ahorro)) + '</strong></div>' +
-        '<div><small>Debe</small><strong>' + esc(dinero(r.deuda)) + '</strong></div><div><small>Movimientos</small><strong>' + sel.movimientos.length + '</strong></div></div>' +
+        '<div><small>Debe (préstamos)</small><strong>' + esc(dinero(r.deuda)) + '</strong></div>' +
+        '<div><small>Tarjeta</small><strong>' + (sel.tarjeta ? esc(dinero(B.resumenTarjeta(sel).deuda)) + ' de ' + esc(dinero(sel.tarjeta.limite)) : 'Sin tarjeta') + '</strong></div>' +
+        '<div><small>Certificados</small><strong>' + esc(dinero(B.certificadosActivos(sel).reduce((x, k) => x + k.capital, 0))) + '</strong></div>' +
+        '<div><small>Dólares</small><strong>' + esc(usd(sel.saldos.dolares)) + '</strong></div>' +
+        '<div><small>Movimientos</small><strong>' + sel.movimientos.length + '</strong></div></div>' +
         '<div class="tarjeta-cuerpo rejilla">' +
         '<form class="formulario" data-form="ajuste"><h3>Premio o multa</h3>' +
         campo('Monto', '<input name="monto" type="number" min="0.01" step="0.01" required placeholder="0.00" />', 'dinero') +
@@ -1199,14 +2016,18 @@
     html += '<div class="rejilla">';
     estado.solicitudes.forEach((s) => {
       const c = estado.clientes.find((x) => x.numero === s.numero);
-      const tabla = B.tablaAmortizacion(s.monto, s.tasa, s.plazo);
+      const tabla = B.tablaAmortizacion(s.monto, s.tasa, s.plazo, s.sistema);
       const total = tabla.reduce((t, f) => t + f.cuota, 0);
+      const apertura = B.sumaCargos(B.cargosDe(estado, 'apertura-prestamo', s.monto));
       html +=
         '<section class="tarjeta"><div class="tarjeta-cabeza"><div class="cabecera-fila"><span class="avatar">' + iniciales(c ? c.nombre : '?') + '</span><div><h2>' + esc(c ? c.nombre : s.numero) + '</h2><p class="ayuda">Solicitado en el mes ' + s.mes + '</p></div></div><span class="etiqueta oro">Pendiente</span></div>' +
         '<div class="tarjeta-cuerpo resumen">' +
+        filaResumen('Tipo', 'Préstamo ' + esc(nombreTipo(s.tipo).toLowerCase())) +
         filaResumen('Monto', esc(dinero(s.monto))) +
         filaResumen('Plazo y tasa', s.plazo + ' meses al ' + s.tasa + '%') +
-        filaResumen('Cuota mensual', esc(dinero(tabla[0].cuota))) +
+        filaResumen('Sistema', esc(B.SISTEMAS[s.sistema || 'frances'])) +
+        filaResumen(s.sistema === 'aleman' ? 'Primera cuota' : 'Cuota mensual', esc(dinero(tabla[0].cuota))) +
+        filaResumen('Comisión de apertura', esc(dinero(apertura))) +
         filaResumen('Total a pagar', esc(dinero(total))) +
         filaResumen('Motivo', esc(s.motivo || '—')) +
         filaResumen('Saldo actual', esc(dinero(c ? c.saldos.corriente : 0)) + ' + ' + esc(dinero(c ? c.saldos.ahorro : 0)) + ' ahorro') +
@@ -1222,13 +2043,21 @@
     html +=
       '<section class="tarjeta"><div class="tarjeta-cuerpo formulario"><p>Al cerrar el mes, el banco hace automáticamente:</p>' +
       '<div class="item"><span class="item-icono verde">' + I('porcentaje') + '</span><span class="item-texto"><strong>Paga ' + cfg.tasaAhorroMensual + '% de interés</strong><small>sobre el saldo de cada cuenta de ahorro (interés compuesto)</small></span></div>' +
-      '<div class="item"><span class="item-icono morado">' + I('prestamo') + '</span><span class="item-texto"><strong>Cobra la cuota de cada préstamo</strong><small>desde la cuenta corriente; si no hay saldo, la cuota queda atrasada</small></span></div>' +
+      '<div class="item"><span class="item-icono verde">' + I('escudo') + '</span><span class="item-texto"><strong>Paga ' + cfg.tasaCertificadoMensual + '% a los certificados</strong><small>y devuelve capital + intereses de los que vencen</small></span></div>' +
+      '<div class="item"><span class="item-icono">' + I('tarjeta') + '</span><span class="item-texto"><strong>Hace el corte de las tarjetas</strong><small>mora de ' + esc(dinero(cfg.cargoMoraTarjeta)) + ' si no cubrieron el mínimo e interés de ' + cfg.tasaTarjetaMensual + '% sobre lo no pagado</small></span></div>' +
+      '<div class="item"><span class="item-icono morado">' + I('prestamo') + '</span><span class="item-texto"><strong>Cobra la cuota de cada préstamo</strong><small>desde la cuenta corriente; si no hay saldo, la cuota queda atrasada y se suma una mora de ' + esc(dinero(cfg.cargoMoraPrestamo)) + '</small></span></div>' +
+      '<div class="item"><span class="item-icono rojo">' + I('alerta') + '</span><span class="item-texto"><strong>Cobra mantenimiento de ' + esc(dinero(cfg.cargoMantenimiento)) + '</strong><small>a las cuentas corrientes con menos de ' + esc(dinero(cfg.saldoMinimo)) + '</small></span></div>' +
       '<button class="boton" style="max-width:320px" data-accion="cerrar-mes">' + I('calendario') + 'Cerrar el mes ' + estado.mes + '</button></div></section>';
     if (estado.historialMeses.length) {
       html +=
-        '<section class="tarjeta"><div class="tarjeta-cabeza"><h2>Meses cerrados</h2></div><div class="tabla-envoltura"><table><thead><tr><th>Mes</th><th class="num">Intereses pagados</th><th class="num">Cuotas cobradas</th><th>Cuotas sin pagar</th></tr></thead><tbody>' +
+        '<section class="tarjeta"><div class="tarjeta-cabeza"><h2>Meses cerrados</h2></div><div class="tabla-envoltura"><table><thead><tr><th>Mes</th><th class="num">Intereses pagados</th><th class="num">Ganancia del banco</th><th class="num">Cuotas cobradas</th><th>Cuotas sin pagar</th><th>Tarjetas en mora</th></tr></thead><tbody>' +
         estado.historialMeses
-          .map((r) => '<tr><td>' + r.mes + '</td><td class="num">' + esc(dinero(r.interesesPagados)) + '</td><td class="num">' + r.cuotasCobradas + '</td><td>' + (r.cuotasSinPagar.length ? r.cuotasSinPagar.map((x) => esc(x.nombre) + ' (' + x.atrasadas + ')').join(', ') : '—') + '</td></tr>')
+          .map(
+            (r) =>
+              '<tr><td>' + r.mes + '</td><td class="num">' + esc(dinero(r.interesesPagados)) + '</td><td class="num">' + esc(dinero(r.cargosCobrados || 0)) + '</td><td class="num">' + r.cuotasCobradas + '</td><td>' +
+              (r.cuotasSinPagar.length ? r.cuotasSinPagar.map((x) => esc(x.nombre) + ' (' + x.atrasadas + ')').join(', ') : '—') + '</td><td>' +
+              ((r.tarjetasEnMora || []).length ? r.tarjetasEnMora.map((x) => esc(x.nombre)).join(', ') : '—') + '</td></tr>'
+          )
           .join('') +
         '</tbody></table></div></section>';
     }
@@ -1238,19 +2067,58 @@
   function dAjustes() {
     const cfg = estado.config;
     const num = (n, v, extra) => '<input name="' + n + '" type="number" required value="' + v + '" ' + (extra || '') + ' />';
+    const m = (n, et, ico) => campo(et, num(n, unidades(cfg[n]), 'min="0" step="0.01"'), ico || 'dinero');
+    const pct = (n, et) => campo(et, num(n, cfg[n], 'min="0" max="100" step="0.01"'), 'porcentaje');
+    const grupo = (titulo, campos) => '<h3 style="margin-top:8px">' + titulo + '</h3><div class="fila-campos">' + campos + '</div>';
     return (
-      cabezaEscritorio('Ajustes', 'Reglas del banco y copias de seguridad.') +
-      '<section class="tarjeta"><div class="tarjeta-cabeza"><h2>Reglas del banco</h2></div><form class="tarjeta-cuerpo formulario" data-form="config">' +
-      '<div class="fila-campos">' +
-      campo('Nombre del banco', '<input name="nombreBanco" maxlength="30" required value="' + esc(cfg.nombreBanco) + '" />', 'prestamo') +
-      campo('Símbolo de la moneda', '<input name="simbolo" maxlength="4" required value="' + esc(cfg.simbolo) + '" />', 'dinero') +
-      campo('Depósito de apertura', num('saldoInicial', unidades(cfg.saldoInicial), 'min="0" step="0.01"'), 'estrella') +
-      campo('Préstamo máximo', num('montoMaximoPrestamo', unidades(cfg.montoMaximoPrestamo), 'min="0" step="0.01"'), 'prestamo') +
-      campo('Interés del ahorro (% mensual)', num('tasaAhorroMensual', cfg.tasaAhorroMensual, 'min="0" max="100" step="0.01"'), 'porcentaje') +
-      campo('Interés de préstamos (% mensual)', num('tasaPrestamoMensual', cfg.tasaPrestamoMensual, 'min="0" max="100" step="0.01"'), 'porcentaje') +
-      campo('Plazos (meses, separados por coma)', '<input name="plazosPrestamo" required value="' + esc(cfg.plazosPrestamo.join(', ')) + '" />', 'calendario') +
-      campo('Clave de docente', '<input class="pin" name="pinDocente" inputmode="numeric" maxlength="4" required value="' + esc(cfg.pinDocente) + '" />', 'llave') +
-      '</div><div class="aviso-banner azul">' + I('info') + '<span>Los cambios de tasa aplican a préstamos nuevos. Los préstamos ya aprobados mantienen su tasa.</span></div>' +
+      cabezaEscritorio('Ajustes', 'Reglas del banco, tarifas y copias de seguridad.') +
+      '<section class="tarjeta"><div class="tarjeta-cabeza"><h2>Reglas y tarifas del banco</h2></div><form class="tarjeta-cuerpo formulario" data-form="config">' +
+      grupo(
+        'General',
+        campo('Nombre del banco', '<input name="nombreBanco" maxlength="30" required value="' + esc(cfg.nombreBanco) + '" />', 'prestamo') +
+          campo('Símbolo de la moneda', '<input name="simbolo" maxlength="4" required value="' + esc(cfg.simbolo) + '" />', 'dinero') +
+          campo('Clave de docente', '<input class="pin" name="pinDocente" inputmode="numeric" maxlength="4" required value="' + esc(cfg.pinDocente) + '" />', 'llave')
+      ) +
+      grupo(
+        'Cuentas',
+        m('saldoInicial', 'Depósito de apertura', 'estrella') +
+          pct('tasaAhorroMensual', 'Interés del ahorro (% mensual)') +
+          m('saldoMinimo', 'Saldo mínimo de la corriente') +
+          m('cargoMantenimiento', 'Cargo por mantenimiento') +
+          m('comisionRetiro', 'Comisión por retiro') +
+          m('comisionTransferencia', 'Comisión por transferencia') +
+          pct('impuestoTransaccion', 'Impuesto a transacciones (%)')
+      ) +
+      grupo(
+        'Préstamos',
+        pct('tasaPrestamoMensual', 'Personal (% mensual)') +
+          pct('tasaPrestamoEducativo', 'Educativo (% mensual)') +
+          pct('tasaPrestamoEmprendimiento', 'Emprendimiento (% mensual)') +
+          m('montoMaximoPrestamo', 'Préstamo máximo', 'prestamo') +
+          campo('Plazos (meses, separados por coma)', '<input name="plazosPrestamo" required value="' + esc(cfg.plazosPrestamo.join(', ')) + '" />', 'calendario') +
+          pct('comisionApertura', 'Comisión de apertura (%)') +
+          m('cargoMoraPrestamo', 'Mora por cuota atrasada')
+      ) +
+      grupo(
+        'Tarjeta de crédito',
+        m('limiteTarjeta', 'Límite de crédito', 'tarjeta') +
+          pct('tasaTarjetaMensual', 'Interés (% mensual)') +
+          pct('pagoMinimoPorcentaje', 'Pago mínimo (% del saldo)') +
+          m('pagoMinimoFijo', 'Pago mínimo fijo') +
+          m('cargoMoraTarjeta', 'Cargo por mora') +
+          pct('comisionAvance', 'Comisión por avance (%)') +
+          m('cuotaEmisionTarjeta', 'Cuota de emisión')
+      ) +
+      grupo(
+        'Certificados y divisas',
+        pct('tasaCertificadoMensual', 'Certificados (% mensual)') +
+          campo('Plazos de certificados (meses)', '<input name="plazosCertificado" required value="' + esc(cfg.plazosCertificado.join(', ')) + '" />', 'calendario') +
+          m('montoMinimoCertificado', 'Monto mínimo de certificado') +
+          pct('penalidadCertificado', 'Penalidad por cancelar (%)') +
+          campo('El banco compra el dólar a', num('tasaCompraUSD', cfg.tasaCompraUSD, 'min="0.01" step="0.01"'), 'dolar') +
+          campo('El banco vende el dólar a', num('tasaVentaUSD', cfg.tasaVentaUSD, 'min="0.01" step="0.01"'), 'dolar')
+      ) +
+      '<div class="aviso-banner azul">' + I('info') + '<span>Los cambios de tasa aplican a productos nuevos. Los préstamos, tarjetas y certificados ya abiertos mantienen su tasa. Pon un cargo en 0 para no cobrarlo.</span></div>' +
       '<button class="boton" style="max-width:260px">Guardar reglas</button></form></section>' +
       '<div class="rejilla">' +
       '<section class="tarjeta"><div class="tarjeta-cabeza"><h2>Copia de seguridad</h2></div><div class="tarjeta-cuerpo formulario">' +
@@ -1281,6 +2149,8 @@
   }
 
   function irA(pantalla) {
+    if (!SUBPANTALLAS.includes(pantalla)) ui.pila = [];
+    else if (pantalla !== ui.pantalla) ui.pila.push(ui.pantalla);
     ui.pantalla = pantalla;
     ui.op = null;
     pintar(true);
@@ -1394,22 +2264,18 @@
       operar(() => B.cambiarPin(estado, ui.seleccion, d.pin), 'Clave actualizada.');
     },
     config(d) {
-      operar(
-        () =>
-          B.actualizarConfig(estado, {
-            nombreBanco: d.nombreBanco.trim(),
-            simbolo: d.simbolo.trim(),
-            saldoInicial: B.aCentavos(d.saldoInicial),
-            montoMaximoPrestamo: B.aCentavos(d.montoMaximoPrestamo),
-            tasaAhorroMensual: Number(d.tasaAhorroMensual),
-            tasaPrestamoMensual: Number(d.tasaPrestamoMensual),
-            plazosPrestamo: d.plazosPrestamo.split(/[,;\s]+/).filter(Boolean).map(Number).sort((a, b) => a - b),
-            pinDocente: d.pinDocente,
-          }),
-        'Reglas guardadas.'
-      );
+      const plazos = (t) => String(t).split(/[,;\s]+/).filter(Boolean).map(Number).sort((a, b) => a - b);
+      const cambios = { nombreBanco: d.nombreBanco.trim(), simbolo: d.simbolo.trim(), pinDocente: d.pinDocente, plazosPrestamo: plazos(d.plazosPrestamo), plazosCertificado: plazos(d.plazosCertificado) };
+      operar(() => {
+        CAMPOS_MONTO.forEach((k) => (cambios[k] = B.aCentavos(d[k])));
+        CAMPOS_NUMERO.forEach((k) => (cambios[k] = Number(d[k])));
+        B.actualizarConfig(estado, cambios);
+      }, 'Reglas guardadas.');
     },
   };
+
+  const CAMPOS_MONTO = ['saldoInicial', 'saldoMinimo', 'cargoMantenimiento', 'comisionRetiro', 'comisionTransferencia', 'montoMaximoPrestamo', 'cargoMoraPrestamo', 'limiteTarjeta', 'pagoMinimoFijo', 'cargoMoraTarjeta', 'cuotaEmisionTarjeta', 'montoMinimoCertificado'];
+  const CAMPOS_NUMERO = ['tasaAhorroMensual', 'impuestoTransaccion', 'tasaPrestamoMensual', 'tasaPrestamoEducativo', 'tasaPrestamoEmprendimiento', 'comisionApertura', 'tasaTarjetaMensual', 'pagoMinimoPorcentaje', 'comisionAvance', 'tasaCertificadoMensual', 'penalidadCertificado', 'tasaCompraUSD', 'tasaVentaUSD'];
 
   function ejecutarOperacion(c, spec) {
     try {
@@ -1463,6 +2329,32 @@
       ui.op = { tipo: v, paso: 'datos', datos: {}, volver };
       pintar();
     },
+    volver() {
+      const anterior = ui.pila.pop() || 'inicio';
+      ui.pantalla = anterior;
+      ui.op = null;
+      pintar(true);
+    },
+    calc(v) {
+      ui.calc = v || 'simple';
+      if (ui.pantalla === 'calculadoras') pintar();
+      else irA('calculadoras');
+    },
+    async 'cancelar-certificado'(v) {
+      const c = clienteActual();
+      const cert = c && c.certificados.find((x) => x.id === v);
+      if (!cert) return;
+      const penalidad = Math.round((cert.capital * estado.config.penalidadCertificado) / 100);
+      const ok = await hoja({
+        peligro: true,
+        icono: 'alerta',
+        titulo: '¿Cancelar el certificado antes de tiempo?',
+        texto: 'Recibirás ' + dinero(cert.capital - penalidad) + ': pierdes ' + dinero(cert.interes) + ' de intereses ganados y pagas una penalidad de ' + dinero(penalidad) + ' (' + estado.config.penalidadCertificado + '%).',
+        ok: 'Sí, cancelarlo',
+        cancelar: 'Mantenerlo',
+      });
+      if (ok) operar(() => B.cancelarCertificado(estado, c.numero, v), 'Certificado cancelado. El dinero está en tu cuenta corriente.');
+    },
     'atras-op'() {
       if (ui.op.paso === 'confirmar') {
         ui.op.paso = 'datos';
@@ -1472,7 +2364,9 @@
       }
     },
     'terminar-op'() {
-      irA('inicio');
+      const destino = ui.op && ui.op.recibo && ui.op.recibo.volverA;
+      if (destino === 'producto') ui.producto = 'tarjeta';
+      irA(destino || 'inicio');
     },
     'monto-rapido'(v, el) {
       const input = el.closest('form').querySelector('input[name=monto]');
@@ -1563,11 +2457,11 @@
       }
     },
     async 'cerrar-mes'() {
-      const ok = await hoja({ icono: 'calendario', titulo: '¿Cerrar el mes ' + estado.mes + '?', texto: 'Se pagarán los intereses del ahorro y se cobrarán las cuotas de los préstamos.', ok: 'Cerrar mes' });
+      const ok = await hoja({ icono: 'calendario', titulo: '¿Cerrar el mes ' + estado.mes + '?', texto: 'Se pagarán los intereses del ahorro y los certificados, se hará el corte de las tarjetas y se cobrarán cuotas, moras y mantenimiento.', ok: 'Cerrar mes' });
       if (!ok) return;
       operar(
         () => B.avanzarMes(estado),
-        (r) => 'Mes ' + r.mes + ' cerrado: ' + dinero(r.interesesPagados) + ' en intereses, ' + r.cuotasCobradas + ' cuota(s) cobrada(s).'
+        (r) => 'Mes ' + r.mes + ' cerrado: ' + dinero(r.interesesPagados) + ' en intereses pagados, ' + dinero(r.cargosCobrados) + ' de ganancia para el banco, ' + r.cuotasCobradas + ' cuota(s) cobrada(s).'
       );
     },
     exportar() {
@@ -1619,41 +2513,28 @@
       nuevo.focus();
       nuevo.setSelectionRange(pos, pos);
     }
-    const calc = t.closest('[data-calculadora="ahorro"]');
-    if (calc) {
-      let capital = 0;
-      try {
-        capital = B.aCentavos(calc.querySelector('[name=capital]').value);
-      } catch (err) {
-        capital = 0;
-      }
-      const meses = Math.min(60, parseInt(calc.querySelector('[name=meses]').value, 10) || 0);
-      calc.querySelector('[data-resultado]').innerHTML = resultadoAhorro(capital, meses);
-    }
+    const calc = t.closest('[data-calc]');
+    if (calc) calc.querySelector('[data-resultado]').innerHTML = resultadoCalculadora(calc.dataset.calc, leerCalculadora(calc));
   });
 
   document.addEventListener('change', (e) => {
     const t = e.target;
-    if (t.closest('form[data-form="op-datos"]') && ui.op && ui.op.tipo === 'solicitud') actualizarVistaPrevia(t.form);
+    if (t.form && t.form.dataset.form === 'op-datos') actualizarVistaPrevia(t.form);
     if (t.hasAttribute('data-importar') && t.files[0]) importarArchivo(t);
   });
 
   document.addEventListener('input', (e) => {
     const form = e.target.form;
-    if (form && form.dataset.form === 'op-datos' && ui.op && ui.op.tipo === 'solicitud') actualizarVistaPrevia(form);
+    if (form && form.dataset.form === 'op-datos') actualizarVistaPrevia(form);
   });
 
+  /** Vuelve a calcular la vista previa (cuota, cargos, intereses) de la operación en curso. */
   function actualizarVistaPrevia(form) {
-    const caja = form.querySelector('[data-preview="prestamo"]');
-    if (!caja) return;
-    let monto = 0;
-    try {
-      monto = B.aCentavos(form.monto.value);
-    } catch (err) {
-      monto = 0;
-    }
-    const plazo = Number((form.querySelector('input[name=plazo]:checked') || {}).value);
-    caja.innerHTML = vistaPreviaPrestamo(monto, plazo);
+    const caja = form.querySelector('[data-preview]');
+    const spec = ui.op && OPS[ui.op.tipo];
+    if (!caja || !spec || !spec.preview) return;
+    const d = Object.fromEntries(new FormData(form).entries());
+    caja.innerHTML = spec.preview(clienteActual(), d);
   }
 
   function importarArchivo(input) {

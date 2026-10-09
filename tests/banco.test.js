@@ -3,8 +3,20 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const B = require('../js/banco.js');
 
-function bancoConDos() {
+const SIN_CARGOS = {
+  cargoMantenimiento: 0,
+  comisionRetiro: 0,
+  comisionTransferencia: 0,
+  impuestoTransaccion: 0,
+  comisionApertura: 0,
+  cargoMoraPrestamo: 0,
+  cuotaEmisionTarjeta: 0,
+};
+
+/** Banco con dos clientes y sin comisiones, para probar las reglas básicas. */
+function bancoConDos(conCargos) {
   const e = B.estadoInicial();
+  if (!conCargos) Object.assign(e.config, SIN_CARGOS);
   const ana = B.crearCliente(e, { nombre: 'Ana', pin: '1111' });
   const luis = B.crearCliente(e, { nombre: 'Luis', pin: '2222' });
   return { e, ana, luis };
@@ -141,6 +153,8 @@ test('rechazar préstamo y eliminar cliente', () => {
 test('configuración validada', () => {
   const e = B.estadoInicial();
   B.actualizarConfig(e, { tasaAhorroMensual: 1.5, pinDocente: '4321' });
+  assert.throws(() => B.actualizarConfig(e, { tasaCompraUSD: 70 }), /compra/);
+  assert.throws(() => B.actualizarConfig(e, { limiteTarjeta: -1 }), /negativos/);
   assert.equal(e.config.tasaAhorroMensual, 1.5);
   assert.throws(() => B.actualizarConfig(e, { tasaPrestamoMensual: -1 }), /tasas/);
   assert.throws(() => B.actualizarConfig(e, { pinDocente: 'abc' }), /PIN/);
@@ -173,4 +187,135 @@ test('pago de servicios', () => {
   assert.match(ana.movimientos[0].descripcion, /Luz.*123/);
   assert.throws(() => B.pagarServicio(e, ana.numero, 999999, 'Agua'), /insuficiente/);
   assert.throws(() => B.pagarServicio(e, ana.numero, 100, ''), /servicio/);
+});
+
+test('comisiones e impuesto en transferencias y retiros', () => {
+  const { e, ana, luis } = bancoConDos(true);
+  const cargos = B.cargosDe(e, 'transferencia', 20000);
+  assert.deepEqual(cargos.map((c) => c.monto), [500, 30]); // ₵5 + 0.15% de ₵200
+  B.transferir(e, ana.numero, luis.numero, 20000);
+  assert.equal(ana.saldos.corriente, 100000 - 20000 - 530);
+  assert.equal(luis.saldos.corriente, 120000);
+  B.retirar(e, luis.numero, 10000, null, true);
+  assert.equal(luis.saldos.corriente, 120000 - 10000 - 1000 - 15);
+  B.retirar(e, luis.numero, 10000, 'Multa del docente'); // sin cargos
+  assert.equal(luis.saldos.corriente, 120000 - 21015);
+  assert.throws(() => B.transferir(e, ana.numero, luis.numero, ana.saldos.corriente), /cargos/);
+  const ing = B.ingresosBanco(e);
+  assert.equal(ing.comisiones, 1500);
+  assert.equal(ing.impuestos, 45);
+});
+
+test('mantenimiento de cuenta al cerrar el mes', () => {
+  const { e, ana, luis } = bancoConDos(true);
+  B.retirar(e, ana.numero, 70000); // queda ₵300 < ₵500
+  const r = B.avanzarMes(e);
+  assert.equal(ana.saldos.corriente, 30000 - 2500);
+  assert.equal(luis.saldos.corriente, 100000);
+  assert.equal(r.cargosCobrados, 2500);
+});
+
+test('préstamo con comisión de apertura, sistema alemán y mora', () => {
+  const { e, ana } = bancoConDos(true);
+  const s = B.solicitarPrestamo(e, ana.numero, 60000, 3, 'libros', 'educativo', 'aleman');
+  assert.equal(s.tasa, 1.5);
+  const p = B.aprobarPrestamo(e, s.id);
+  assert.equal(ana.saldos.corriente, 100000 + 60000 - 1200);
+  assert.deepEqual(p.tabla.map((f) => f.capital), [20000, 20000, 20000]);
+  assert.deepEqual(p.tabla.map((f) => f.cuota), [20900, 20600, 20300]);
+  // Sin saldo: la cuota queda atrasada y se acumula mora.
+  B.retirar(e, ana.numero, ana.saldos.corriente);
+  B.avanzarMes(e);
+  assert.equal(B.resumenPrestamo(p).mora, 5000);
+  assert.equal(B.resumenPrestamo(p).proximoPago, 20900 + 5000);
+  B.depositar(e, ana.numero, 30000);
+  B.pagarCuota(e, ana.numero, p.id);
+  assert.equal(ana.saldos.corriente, 30000 - 25900);
+  assert.equal(B.resumenPrestamo(p).mora, 0);
+  assert.throws(() => B.solicitarPrestamo(e, ana.numero, 1000, 3, '', 'vacaciones'), /tipo/);
+});
+
+test('tarjeta de crédito: compras, corte, pago mínimo, intereses y mora', () => {
+  const { e, ana } = bancoConDos(true);
+  assert.throws(() => B.comprarConTarjeta(e, ana.numero, 1000, 'X'), /activar/);
+  B.activarTarjeta(e, ana.numero);
+  assert.throws(() => B.activarTarjeta(e, ana.numero), /Ya tienes/);
+  assert.equal(B.resumenTarjeta(ana).deuda, 10000); // cuota de emisión
+  B.comprarConTarjeta(e, ana.numero, 90000, 'Librería');
+  assert.throws(() => B.comprarConTarjeta(e, ana.numero, 60000, 'Tienda'), /disponible/);
+  B.avanzarMes(e); // primer corte: debe ₵1,000
+  let r = B.resumenTarjeta(ana);
+  assert.equal(r.saldoCorte, 100000);
+  assert.equal(r.pagoMinimo, 5000); // 5% = ₵50
+  // No paga nada: mora ₵100 + interés 4% de ₵1,000 = ₵40
+  B.avanzarMes(e);
+  r = B.resumenTarjeta(ana);
+  assert.equal(r.deuda, 100000 + 10000 + 4000);
+  assert.equal(r.saldoCorte, 114000);
+  assert.equal(r.pagoMinimo, 5700);
+  // Paga el total: no hay intereses ni mora en el siguiente corte
+  B.depositar(e, ana.numero, 20000);
+  B.pagarTarjeta(e, ana.numero, 114000);
+  B.avanzarMes(e);
+  r = B.resumenTarjeta(ana);
+  assert.equal(r.deuda, 0);
+  assert.equal(r.pagoMinimo, 0);
+  assert.throws(() => B.pagarTarjeta(e, ana.numero, 100), /no tiene deuda/);
+});
+
+test('avance de efectivo con comisión', () => {
+  const { e, ana } = bancoConDos(true);
+  B.activarTarjeta(e, ana.numero);
+  B.avanceEfectivo(e, ana.numero, 20000);
+  assert.equal(ana.saldos.corriente, 120000);
+  assert.equal(B.resumenTarjeta(ana).deuda, 10000 + 20000 + 1000);
+});
+
+test('certificados: interés simple vs compuesto, vencimiento y cancelación', () => {
+  const { e, ana, luis } = bancoConDos(true);
+  const simple = B.proyeccionCertificado(100000, 1.5, 3, 'simple');
+  const compuesto = B.proyeccionCertificado(100000, 1.5, 3, 'compuesto');
+  assert.equal(simple.interes, 4500);
+  assert.equal(compuesto.interes, 1500 + 1523 + 1545);
+  assert.throws(() => B.abrirCertificado(e, ana.numero, 1000, 3, 'simple'), /mínimo/);
+  B.abrirCertificado(e, ana.numero, 100000, 3, 'compuesto');
+  assert.equal(ana.saldos.corriente, 0);
+  B.avanzarMes(e);
+  B.avanzarMes(e);
+  const r = B.avanzarMes(e);
+  assert.equal(r.certificadosVencidos, 1);
+  assert.equal(ana.saldos.corriente, 100000 + compuesto.interes);
+  const c = B.abrirCertificado(e, luis.numero, 50000, 6, 'simple');
+  B.avanzarMes(e);
+  B.cancelarCertificado(e, luis.numero, c.id);
+  assert.equal(luis.saldos.corriente, 100000 - 1000);
+  assert.throws(() => B.cancelarCertificado(e, luis.numero, c.id), /activo/);
+});
+
+test('compra y venta de dólares con diferencial', () => {
+  const { e, ana } = bancoConDos(true);
+  B.comprarDolares(e, ana.numero, 1000); // US$10 a 60.50
+  assert.equal(ana.saldos.corriente, 100000 - 60500);
+  assert.equal(ana.saldos.dolares, 1000);
+  B.venderDolares(e, ana.numero, 1000); // a 58.50
+  assert.equal(ana.saldos.corriente, 100000 - 2000);
+  assert.throws(() => B.venderDolares(e, ana.numero, 1), /dólares/);
+});
+
+test('fórmulas de matemática financiera', () => {
+  assert.deepEqual(B.formulas.interesSimple(100000, 2, 6), { interes: 12000, monto: 112000 });
+  assert.equal(B.formulas.interesCompuesto(100000, 2, 6).monto, 112616);
+  assert.equal(B.formulas.anualidad(10000, 1, 12).monto, 126825);
+  assert.ok(Math.abs(B.formulas.tasaAnualEquivalente(1) - 12.6825) < 0.001);
+  assert.ok(Math.abs(B.formulas.tasaMensualEquivalente(12.6825) - 1) < 0.0001);
+});
+
+test('copias antiguas se completan con los datos nuevos', () => {
+  const vieja = B.estadoInicial();
+  vieja.clientes.push({ numero: '4A-001', nombre: 'Ana', pin: '1111', creadoMes: 1, saldos: { corriente: 100, ahorro: 0 }, prestamos: [], movimientos: [] });
+  const e = B.importar(JSON.stringify(vieja));
+  assert.equal(e.clientes[0].saldos.dolares, 0);
+  assert.deepEqual(e.clientes[0].certificados, []);
+  assert.equal(e.clientes[0].tarjeta, null);
+  assert.equal(e.config.limiteTarjeta, 150000);
 });
