@@ -6,23 +6,26 @@ Es una página web que funciona en cualquier navegador, sin instalar nada y sin 
 
 ## Qué puede hacer
 
-**Estudiantes** (entran con su nombre y un PIN de 4 números)
+La app imita una banca móvil real: pantalla de inicio de sesión, tarjetas de productos, menú inferior, operaciones paso a paso con confirmación por clave y comprobante con número de referencia.
 
-- Ver sus saldos (cuenta corriente, ahorro y deuda) y el historial de movimientos.
-- Depositar y retirar dinero.
-- Transferir dinero a un compañero.
-- Pasar dinero a su cuenta de ahorro y calcular cuánto tendrán con la fórmula M = C · (1 + i)ⁿ.
-- Simular un préstamo (cuota, total a pagar, intereses y tabla de amortización) y solicitarlo.
-- Pagar cuotas de su préstamo.
+**Estudiantes** (entran con su nombre o número de cuenta y una clave de 4 números)
 
-**Docente** (entra con el PIN de docente, al inicio `1234`)
+- Inicio con saldo total, tarjetas de Cuenta Corriente, Cuenta de Ahorro y Préstamo, accesos rápidos y últimos movimientos. Los saldos se pueden ocultar.
+- Transferir a un compañero o entre sus propias cuentas.
+- Depositar y retirar dinero didáctico.
+- Pagar servicios simulados (luz, agua, internet, cantina, transporte…).
+- Ahorrar con interés compuesto y calcular cuánto tendrán con la fórmula M = C · (1 + i)ⁿ.
+- Simular y solicitar préstamos con cuota fija, ver la tabla de amortización y pagar cuotas.
+- Historial de movimientos por mes, cambio de clave y una sección de educación financiera.
 
-- Abrir cuentas una por una o pegando toda la lista del curso (el PIN se crea solo y se puede imprimir).
-- Ver los saldos de todo el curso, sumar premios o restar multas, cambiar PIN y cerrar cuentas.
+**Docente** (entra con la clave de docente, al inicio `1234`)
+
+- Resumen del banco: dinero en cuentas, ahorrado y por cobrar, alertas y mejores ahorradores.
+- Abrir cuentas una por una o pegando toda la lista del curso (la clave se crea sola y se puede imprimir).
+- Ver cada cliente, dar premios o multas, cambiar su clave, cerrar su cuenta y **ver su app como la ve el estudiante**.
 - Aprobar o rechazar solicitudes de préstamo.
 - **Cerrar el mes**: el banco paga intereses del ahorro y cobra las cuotas de los préstamos. Si un estudiante no tiene saldo, la cuota queda atrasada.
-- Cambiar las reglas: nombre del banco, símbolo de la moneda, depósito de apertura, tasas de interés, préstamo máximo y plazos.
-- Descargar y cargar copias de seguridad.
+- Cambiar las reglas del banco y descargar o cargar copias de seguridad.
 
 ## Reglas iniciales
 
@@ -56,5 +59,6 @@ También se puede abrir directamente el archivo `index.html` en el navegador.
 
 - `index.html`, `css/estilos.css`: la página.
 - `js/banco.js`: las reglas del banco (cálculos de interés, préstamos, validaciones). Todo el dinero se maneja en centavos enteros.
-- `js/app.js`: la interfaz.
+- `js/app.js`: la interfaz (pantallas del estudiante y panel docente).
+- `js/iconos.js`: los iconos.
 - `tests/`: pruebas de las reglas del banco. Se ejecutan con `npm test` (Node 18 o superior).
