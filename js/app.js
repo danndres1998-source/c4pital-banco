@@ -287,6 +287,8 @@
     'pago-tarjeta': ['tarjeta', 'verde'],
     certificado: ['escudo', 'verde'],
     divisas: ['dolar', 'turquesa'],
+    inversion: ['grafica', 'turquesa'],
+    reembolso: ['escudo', 'verde'],
   };
 
   const NOMBRE_CUENTA = { corriente: 'Corriente', ahorro: 'Ahorro', dolares: 'Dólares', tarjeta: 'Tarjeta' };
@@ -470,6 +472,7 @@
         prestamos: pPrestamos,
         certificados: pCertificados,
         divisas: pDivisas,
+        bolsa: pBolsa,
         calculadoras: pCalculadoras,
         tarifario: pTarifario,
         mas: pMas,
@@ -481,7 +484,7 @@
   }
 
   /** Pantallas con botón de volver (sin menú inferior). */
-  const SUBPANTALLAS = ['movimientos', 'producto', 'prestamos', 'certificados', 'divisas', 'calculadoras', 'tarifario'];
+  const SUBPANTALLAS = ['movimientos', 'producto', 'prestamos', 'certificados', 'divisas', 'bolsa', 'calculadoras', 'tarifario'];
 
   function navInferior(c) {
     const r = resumenCliente(c);
@@ -546,6 +549,12 @@
         '<button class="producto dolares" data-accion="producto" data-valor="dolares"><span class="producto-tipo">' + I('dolar') + 'Cuenta en dólares</span>' +
         '<span class="producto-saldo">' + (ui.ocultar ? 'US$ • • • •' : esc(usd(c.saldos.dolares))) + '</span><span class="producto-pie"><span>≈ ' + saldo(Math.round(c.saldos.dolares * estado.config.tasaCompraUSD)) + '</span><span>' + mascara(c.numero) + '-D</span></span></button>';
     }
+    const inv = B.resumenInversiones(estado, c);
+    if (inv.posiciones.length) {
+      html +=
+        '<button class="producto bolsa" data-accion="ir" data-valor="bolsa"><span class="producto-tipo">' + I('grafica') + 'Mis acciones</span>' +
+        '<span class="producto-saldo">' + saldo(inv.valor) + '</span><span class="producto-pie"><span>' + (inv.ganancia >= 0 ? 'Ganas ' : 'Pierdes ') + saldo(Math.abs(inv.ganancia)) + '</span><span>' + inv.posiciones.length + ' empresa(s)</span></span></button>';
+    }
     if (!rt) html += '<button class="producto nuevo" data-accion="producto" data-valor="tarjeta">' + I('tarjeta') + 'Pide tu tarjeta de crédito</button>';
     else if (!r.activos.length) html += '<button class="producto nuevo" data-accion="operar" data-valor="solicitud">' + I('mas1') + 'Solicitar un préstamo</button>';
     html += '</div>';
@@ -572,8 +581,12 @@
       ['ir', 'prestamos', 'prestamo', 'Préstamos'],
       ['ir', 'certificados', 'escudo', 'Certificados'],
       ['ir', 'divisas', 'dolar', 'Divisas'],
+      ['ir', 'bolsa', 'grafica', 'Bolsa'],
       ['ir', 'calculadoras', 'calculadora', 'Calculadoras'],
       ['ir', 'tarifario', 'lista', 'Tarifario'],
+      ['ir', 'movimientos', 'reloj', 'Movimientos'],
+      ['operar', 'reporte', 'escudo', 'Reportar fraude'],
+      ['operar', 'clave', 'llave', 'Mi clave'],
       ['ir', 'mas', 'libro', 'Aprende'],
     ];
     html +=
@@ -592,6 +605,7 @@
     const filtro = ui.filtroMov;
     const movs = c.movimientos.filter((m) => filtro === 'todos' || (filtro === 'entradas' ? m.monto > 0 : m.monto < 0));
     let html = barraSuperior('Movimientos');
+    html += '<div class="seccion"><div class="aviso-banner">' + I('escudo') + '<span>¿Ves una operación que no hiciste? <button class="enlace" data-accion="operar" data-valor="reporte">Repórtala aquí</button></span></div></div>';
     html +=
       '<div class="seccion"><div class="segmentos" role="group">' +
       [['todos', 'Todos'], ['entradas', 'Entradas'], ['salidas', 'Salidas']]
@@ -874,6 +888,7 @@
       '<div class="panel">' +
         itemDepartamento('ir', 'certificados', 'escudo', 'verde', 'Certificados de depósito', 'Plazo fijo al ' + cfg.tasaCertificadoMensual + '% mensual', certs.length ? saldo(certs.reduce((t, x) => t + x.capital, 0)) : '') +
         itemDepartamento('ir', 'divisas', 'globo', 'turquesa', 'Cambio de divisas', 'Compra ' + cfg.tasaCompraUSD + ' · Venta ' + cfg.tasaVentaUSD) +
+        itemDepartamento('ir', 'bolsa', 'grafica', 'turquesa', 'Bolsa de valores', 'Acciones de empresas ficticias', B.resumenInversiones(estado, c).valor ? saldo(B.resumenInversiones(estado, c).valor) : '') +
         '</div>'
     );
     html += seccion(
@@ -1018,6 +1033,85 @@
         filaResumen('Pierdes si compras y vendes', '<span class="negativo">' + esc(dinero(Math.round(10000 * diferencial))) + '</span>', 'total') +
         '</div></div>'
     );
+    return html;
+  }
+
+  /** Gráfica pequeña con la historia del precio de una acción. */
+  function miniGrafica(valores) {
+    if (valores.length < 2) return '<span class="mini-grafica vacia">Sin historia aún</span>';
+    const ultimos = valores.slice(-12);
+    const min = Math.min.apply(null, ultimos);
+    const max = Math.max.apply(null, ultimos);
+    const rango = max - min || 1;
+    const puntos = ultimos.map((v, i) => ((i / (ultimos.length - 1)) * 76 + 2).toFixed(1) + ',' + (22 - ((v - min) / rango) * 20).toFixed(1)).join(' ');
+    const sube = ultimos[ultimos.length - 1] >= ultimos[0];
+    return '<svg class="mini-grafica ' + (sube ? 'positivo' : 'negativo') + '" viewBox="0 0 80 24" aria-hidden="true"><polyline points="' + puntos + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>';
+  }
+
+  function porcentajeConSigno(pct) {
+    const v = Math.round(pct * 10) / 10;
+    return '<span class="' + (v > 0 ? 'positivo' : v < 0 ? 'negativo' : '') + '">' + (v > 0 ? '+' : '') + v.toFixed(1) + '%</span>';
+  }
+
+  const COLOR_RIESGO = { bajo: 'verde', medio: 'oro', alto: 'rojo' };
+
+  function pBolsa(c) {
+    const cfg = estado.config;
+    const inv = B.resumenInversiones(estado, c);
+    let html = barraSuperior('Bolsa de valores');
+    html +=
+      '<div class="paso-titulo"><h2>Invierte en empresas</h2><p>Compra acciones y conviértete en dueño de una parte de la empresa. Su precio cambia cada vez que el docente cierra el mes. Las empresas son inventadas.</p></div>' +
+      '<div class="seccion"><div class="aviso-banner azul">' + I('info') + '<span><strong>Riesgo y rendimiento:</strong> un certificado te paga <strong>' + cfg.tasaCertificadoMensual + '% seguro</strong> al mes. Las acciones pueden ganar más, pero también pueden <strong>perder</strong>. Nadie sabe qué pasará el próximo mes.</span></div></div>';
+
+    if (inv.posiciones.length) {
+      html += seccion(
+        'Mis acciones',
+        datos([
+          ['Valen hoy', saldo(inv.valor)],
+          ['Pagaste', saldo(inv.costo)],
+          [inv.ganancia >= 0 ? 'Ganancia' : 'Pérdida', '<span class="' + (inv.ganancia >= 0 ? 'positivo' : 'negativo') + '">' + saldo(Math.abs(inv.ganancia)) + '</span>'],
+          ['Rendimiento', porcentajeConSigno(inv.porcentaje)],
+        ]) +
+          '<div class="panel" style="margin-top:12px">' +
+          inv.posiciones
+            .map(
+              (p) =>
+                '<div class="item"><span class="item-icono turquesa">' + I('grafica') + '</span><span class="item-texto"><strong>' + esc(p.empresa.nombre) + '</strong><small>' + p.cantidad + ' acción(es) · pagaste ' + esc(dinero(p.costo)) + '</small></span>' +
+                '<span class="item-monto">' + saldo(p.valor) + '<small>' + porcentajeConSigno(p.porcentaje) + '</small></span></div>'
+            )
+            .join('') +
+          '</div>'
+      );
+    }
+
+    html += seccion(
+      'Mercado · mes ' + estado.mes,
+      '<div class="panel">' +
+        B.EMPRESAS.map((e) => {
+          const v = B.variacionEmpresa(estado, e.simbolo);
+          return (
+            '<div class="item"><span class="item-icono ' + COLOR_RIESGO[e.riesgo] + '">' + I('grafica') + '</span><span class="item-texto"><strong>' + esc(e.nombre) + ' <small class="simbolo-bolsa">' + e.simbolo + '</small></strong>' +
+            '<small>' + esc(e.sector) + ' · <span class="etiqueta ' + COLOR_RIESGO[e.riesgo] + '">' + B.NOMBRE_RIESGO[e.riesgo] + '</span></small></span>' +
+            miniGrafica(estado.bolsa.historial[e.simbolo]) +
+            '<span class="item-monto">' + esc(dinero(estado.bolsa.precios[e.simbolo])) + '<small>' + (v.meses ? porcentajeConSigno(v.mes) + ' este mes' : 'precio inicial') + '</small></span></div>'
+          );
+        }).join('') +
+        '</div>' +
+        '<div class="botones dos" style="margin-top:14px"><button class="boton" data-accion="operar" data-valor="acciones">Comprar acciones</button><button class="boton claro" data-accion="operar" data-valor="acciones-vender">Vender acciones</button></div>' +
+        '<p class="ayuda" style="margin-top:10px">Cada compra o venta paga una comisión de ' + cfg.comisionBolsa + '% al corredor de bolsa.</p>'
+    );
+
+    const meses = B.variacionEmpresa(estado, B.EMPRESAS[0].simbolo).meses;
+    if (meses) {
+      const cert = (Math.pow(1 + cfg.tasaCertificadoMensual / 100, meses) - 1) * 100;
+      html += seccion(
+        '¿Acciones o certificado?',
+        '<div class="panel"><div class="panel-cuerpo"><p class="ayuda" style="margin:0 0 10px">Si hubieras invertido al abrir la bolsa, hace ' + meses + ' mes(es):</p><div class="resumen">' +
+          filaResumen('Certificado (interés compuesto)', porcentajeConSigno(cert)) +
+          B.EMPRESAS.map((e) => filaResumen(esc(e.nombre), porcentajeConSigno(B.variacionEmpresa(estado, e.simbolo).total))).join('') +
+          '</div></div></div>'
+      );
+    }
     return html;
   }
 
@@ -1169,6 +1263,11 @@
       grupo('Divisas', 'globo', [
         ['Compra de dólares (el banco compra)', m(Math.round(cfg.tasaCompraUSD * 100))],
         ['Venta de dólares (el banco vende)', m(Math.round(cfg.tasaVentaUSD * 100))],
+      ]) +
+      grupo('Bolsa y seguridad', 'grafica', [
+        ['Comisión de bolsa', cfg.comisionBolsa + '% de cada compra o venta'],
+        ['Confirmación de operaciones', cfg.umbralAlerta > 0 ? 'Desde ' + m(cfg.umbralAlerta) + ' o 3 veces tu gasto normal' : '3 veces tu gasto normal'],
+        ['Reporte de fraude', 'Gratis: si no hiciste la operación, se te devuelve'],
       ])
     );
   }
@@ -1184,6 +1283,8 @@
       ['Diferencial cambiario', 'globo', 'El banco compra dólares más baratos de lo que los vende. Esa diferencia es su ganancia.'],
       ['Regla 50/30/20', 'grafica', 'Una forma sencilla de organizar tu dinero: <strong>50%</strong> para necesidades, <strong>30%</strong> para gustos y <strong>20%</strong> para ahorrar.'],
       ['Seguridad', 'escudo', 'Tu clave es personal. <strong>Nunca la compartas</strong>, ni siquiera con amigos. Un banco real nunca te pedirá tu clave por mensaje o llamada.'],
+      ['Riesgo y rendimiento', 'grafica', 'Un certificado te paga <strong>' + cfg.tasaCertificadoMensual + '% seguro</strong> cada mes. Una acción puede ganar mucho más… o perder. A más rendimiento posible, más <strong>riesgo</strong>. Lo que una acción hizo en el pasado no garantiza lo que hará mañana, por eso conviene <strong>diversificar</strong>: no pongas todo tu dinero en una sola empresa.'],
+      ['¿Cómo detecta el banco un fraude?', 'alerta', 'El banco aprende cómo gastas normalmente. Si aparece una operación muy grande o muy distinta a tus costumbres, te pregunta <strong>“¿Reconoces esta operación?”</strong>. Revisa tu historial con frecuencia y, si ves algo que no hiciste, <strong>repórtalo</strong> enseguida.'],
     ];
     let html =
       '<section class="perfil"><span class="avatar">' + iniciales(c.nombre) + '</span><div><strong style="font-size:1.1rem">' + esc(c.nombre) + '</strong><br><small>Cuenta ' + esc(c.numero) + ' · Cliente desde el mes ' + c.creadoMes + '</small></div></section>';
@@ -1192,6 +1293,7 @@
       '<div class="panel">' +
         itemDepartamento('ir', 'movimientos', 'reloj', '', 'Historial de movimientos', 'Todas tus operaciones') +
         itemDepartamento('operar', 'clave', 'llave', '', 'Cambiar clave', 'Tu clave de 4 números') +
+        itemDepartamento('operar', 'reporte', 'escudo', 'rojo', 'Reportar una operación', '¿Ves algo que no hiciste?') +
         itemDepartamento('ocultar', '', ui.ocultar ? 'ojoCerrado' : 'ojo', '', ui.ocultar ? 'Mostrar saldos' : 'Ocultar saldos', 'Privacidad en pantalla') +
         itemDepartamento('ir', 'tarifario', 'lista', '', 'Tarifario', 'Tasas, comisiones e impuestos') +
         itemDepartamento('ir', 'calculadoras', 'calculadora', '', 'Calculadoras financieras', 'Practica las fórmulas') +
@@ -1236,6 +1338,7 @@
         ['ir', 'prestamos', 'Préstamos', 'prestamos'],
         ['ir', 'certificados', 'Certificados', 'certificados'],
         ['producto', 'dolares', 'Cuenta en dólares', 'p:dolares'],
+        ['operar', 'reporte', 'Reportar una operación', 'o:reporte'],
       ]],
       ['transferencias', 'transferir', 'Transferencias', [
         ['operar', 'transferencia', 'A otra persona', 'o:transferencia'],
@@ -1253,6 +1356,11 @@
         c.tarjeta ? ['operar', 'compra', 'Compra con tarjeta', 'o:compra'] : ['operar', 'activar-tarjeta', 'Tarjeta de crédito', 'o:activar-tarjeta'],
         ['operar', 'certificado', 'Certificado', 'o:certificado'],
       ]],
+      ['inversiones', 'grafica', 'Bolsa de valores', [
+        ['ir', 'bolsa', 'Mercado y mis acciones', 'bolsa'],
+        ['operar', 'acciones', 'Comprar acciones', 'o:acciones'],
+        ['operar', 'acciones-vender', 'Vender acciones', 'o:acciones-vender'],
+      ]],
       ['divisas', 'globo', 'Divisas', [
         ['ir', 'divisas', 'Tasas del dólar', 'divisas'],
         ['operar', 'divisas', 'Comprar dólares', 'o:divisas'],
@@ -1268,7 +1376,7 @@
   }
 
   function claveActiva() {
-    if (ui.op) return 'o:' + (ui.op.tipo === 'divisas' && ui.op.inicial === 'vender' ? 'divisas-vender' : ui.op.tipo);
+    if (ui.op) return 'o:' + ((ui.op.tipo === 'divisas' || ui.op.tipo === 'acciones') && ui.op.inicial === 'vender' ? ui.op.tipo + '-vender' : ui.op.tipo);
     if (ui.pantalla === 'producto') return 'p:' + ui.producto;
     return ui.pantalla;
   }
@@ -1324,7 +1432,7 @@
     if (ui.op) cuerpo = '<div class="web-panel angosto">' + pantallaOperacion(c) + '</div>';
     else if (ui.pantalla === 'inicio') cuerpo = pPrincipalWeb(c);
     else {
-      const pantallas = { movimientos: pMovimientos, producto: pProducto, pagos: pPagos, productos: pProductos, prestamos: pPrestamos, certificados: pCertificados, divisas: pDivisas, calculadoras: pCalculadoras, tarifario: pTarifario, mas: pMas };
+      const pantallas = { movimientos: pMovimientos, producto: pProducto, pagos: pPagos, productos: pProductos, prestamos: pPrestamos, certificados: pCertificados, divisas: pDivisas, bolsa: pBolsa, calculadoras: pCalculadoras, tarifario: pTarifario, mas: pMas };
       cuerpo = '<div class="web-panel">' + (pantallas[ui.pantalla] || pPrincipalWeb)(c) + '</div>';
     }
 
@@ -1422,13 +1530,15 @@
     }
 
     const certs = B.certificadosActivos(c);
-    if (certs.length || c.saldos.dolares) {
+    const inv = B.resumenInversiones(estado, c);
+    if (certs.length || c.saldos.dolares || inv.posiciones.length) {
       html += seccionWeb(
         'Inversiones',
-        'Certificados de depósito y dólares',
+        'Certificados de depósito, acciones y dólares',
         [
           bloqueWeb('escudo', 'Certificados', [oc(dinero(certs.reduce((s, x) => s + x.capital, 0))), certs.length + ' activo(s)'], 'ir', 'certificados'),
           bloqueWeb('porcentaje', 'Intereses acumulados', [oc(dinero(certs.reduce((s, x) => s + x.interes, 0)))], 'ir', 'certificados'),
+          bloqueWeb('grafica', 'Acciones', [oc(dinero(inv.valor)), inv.posiciones.length ? (inv.ganancia >= 0 ? 'Ganas ' : 'Pierdes ') + oc(dinero(Math.abs(inv.ganancia))) : 'Sin acciones'], 'ir', 'bolsa'),
           bloqueWeb('dolar', 'Dólares', [oc(usd(c.saldos.dolares)), '≈ ' + oc(dinero(Math.round(c.saldos.dolares * cfg.tasaCompraUSD)))], 'producto', 'dolares'),
         ]
       );
@@ -2038,6 +2148,142 @@
       },
     },
 
+    acciones: {
+      titulo: 'Bolsa de valores',
+      pregunta: '¿Qué acciones quieres?',
+      datos(c, d) {
+        const op = d.operacion || ui.op.inicial || 'comprar';
+        const propias = B.resumenInversiones(estado, c).posiciones;
+        const lista = op === 'vender' ? B.EMPRESAS.filter((e) => propias.some((p) => p.simbolo === e.simbolo)) : B.EMPRESAS;
+        const elegida = d.simbolo && lista.some((e) => e.simbolo === d.simbolo) ? d.simbolo : lista.length ? lista[0].simbolo : '';
+        return (
+          radiosSegmento('operacion', [['comprar', 'Comprar'], ['vender', 'Vender']], op, 'Operación') +
+          (lista.length
+            ? '<div class="opciones">' +
+              lista
+                .map((e) => {
+                  const p = propias.find((x) => x.simbolo === e.simbolo);
+                  return opcion('simbolo', e.simbolo, elegida === e.simbolo, '<span class="item-icono ' + COLOR_RIESGO[e.riesgo] + '">' + I('grafica') + '</span><span class="item-texto"><strong>' + esc(e.nombre) + '</strong><small>' + esc(dinero(estado.bolsa.precios[e.simbolo])) + ' por acción · ' + B.NOMBRE_RIESGO[e.riesgo] + (p ? ' · tienes ' + p.cantidad : '') + '</small></span>');
+                })
+                .join('') +
+              '</div>' +
+              campo('Cantidad de acciones', '<input name="cantidad" type="number" inputmode="numeric" min="1" step="1" required placeholder="1" value="' + esc(d.cantidad || '') + '" />', 'grafica') +
+              '<p class="disponible">Disponible en corriente: <strong>' + esc(dinero(c.saldos.corriente)) + '</strong></p>' +
+              '<div data-preview>' + this.preview(c, Object.assign({}, d, { operacion: op, simbolo: elegida })) + '</div>'
+            : '<div class="vacio">' + I('grafica') + '<p>Todavía no tienes acciones para vender.</p></div>')
+        );
+      },
+      preview(c, d) {
+        const cant = Number(d.cantidad);
+        if (!d.simbolo || !Number.isInteger(cant) || cant <= 0) return '<div class="aviso-banner azul">' + I('calculadora') + '<span>Escribe cuántas acciones para ver el total con la comisión.</span></div>';
+        const q = B.cotizarAcciones(estado, d.simbolo, cant, d.operacion);
+        const vender = d.operacion === 'vender';
+        return (
+          '<div class="panel"><div class="panel-cuerpo resumen">' +
+          filaResumen(cant + ' × ' + esc(dinero(q.precio)), esc(dinero(q.valor))) +
+          filaResumen('Comisión de bolsa (' + estado.config.comisionBolsa + '%)', '<span class="negativo">' + esc(dinero(q.comision)) + '</span>') +
+          filaResumen(vender ? 'Recibirás' : 'Pagarás', esc(dinero(q.total)), 'total') +
+          '</div></div>'
+        );
+      },
+      leer(c, d) {
+        const op = d.operacion === 'vender' ? 'vender' : 'comprar';
+        if (!d.simbolo) throw new B.ErrorBanco(op === 'vender' ? 'No tienes acciones para vender.' : 'Elige una empresa.');
+        const cant = Number(d.cantidad);
+        if (!Number.isInteger(cant) || cant <= 0) throw new B.ErrorBanco('Escribe una cantidad entera de acciones (1, 2, 3…).');
+        const q = B.cotizarAcciones(estado, d.simbolo, cant, op);
+        if (op === 'comprar') exigirSaldo(q.total, c.saldos.corriente, 'Necesitas ' + dinero(q.total) + ' en tu cuenta corriente.');
+        else {
+          const tiene = (c.acciones[d.simbolo] || { cantidad: 0 }).cantidad;
+          if (cant > tiene) throw new B.ErrorBanco('Solo tienes ' + tiene + ' acción(es) de esta empresa.');
+        }
+        return { operacion: op, simbolo: d.simbolo, cantidad: cant };
+      },
+      resumen(c, d) {
+        const e = B.EMPRESAS.find((x) => x.simbolo === d.simbolo);
+        const q = B.cotizarAcciones(estado, d.simbolo, d.cantidad, d.operacion);
+        const vender = d.operacion === 'vender';
+        return [
+          ['Operación', vender ? 'Venta de acciones' : 'Compra de acciones'],
+          ['Empresa', esc(e.nombre) + '<br><small class="ayuda">' + B.NOMBRE_RIESGO[e.riesgo] + '</small>'],
+          ['Cantidad', String(d.cantidad)],
+          ['Precio por acción', esc(dinero(q.precio))],
+          ['Comisión de bolsa', '<span class="negativo">' + esc(dinero(q.comision)) + '</span>'],
+          [vender ? 'Se acredita a tu corriente' : 'Se debita de tu corriente', esc(dinero(q.total)), 'total'],
+        ];
+      },
+      ejecutar(c, d) {
+        const e = B.EMPRESAS.find((x) => x.simbolo === d.simbolo);
+        if (d.operacion === 'vender') {
+          const q = B.venderAcciones(estado, c.numero, d.simbolo, d.cantidad);
+          return {
+            titulo: '¡Vendiste tus acciones!',
+            importe: q.total,
+            volverA: 'bolsa',
+            filas: [['Empresa', esc(e.nombre)], ['Cantidad', String(d.cantidad)], ['Precio', esc(dinero(q.precio))], [q.ganancia >= 0 ? 'Ganaste' : 'Perdiste', '<span class="' + (q.ganancia >= 0 ? 'positivo' : 'negativo') + '">' + esc(dinero(Math.abs(q.ganancia))) + '</span>'], ['Saldo corriente', esc(dinero(c.saldos.corriente))]],
+          };
+        }
+        const q = B.comprarAcciones(estado, c.numero, d.simbolo, d.cantidad);
+        return {
+          titulo: '¡Compraste acciones!',
+          importe: q.total,
+          volverA: 'bolsa',
+          nota: 'Su precio cambiará cuando se cierre el mes. Puede subir o bajar.',
+          filas: [['Empresa', esc(e.nombre)], ['Cantidad', String(d.cantidad)], ['Precio', esc(dinero(q.precio))], ['Comisión', esc(dinero(q.comision))], ['Saldo corriente', esc(dinero(c.saldos.corriente))]],
+        };
+      },
+    },
+
+    reporte: {
+      titulo: 'Reportar operación',
+      pregunta: '¿Qué operación no reconoces?',
+      datos(c, d) {
+        const reportadas = c.fraudes.filter((f) => f.estado !== 'pendiente').map((f) => f.movimiento);
+        const salidas = c.movimientos.filter((m) => m.monto < 0 && !reportadas.includes(m.id)).slice(0, 20);
+        if (!salidas.length) return '<div class="vacio">' + I('check') + '<p>No tienes salidas de dinero para revisar.</p></div>';
+        return (
+          '<div class="aviso-banner azul">' + I('escudo') + '<span>Revisa tus salidas de dinero. Si hay una que <strong>tú no hiciste</strong>, elígela y el banco investigará.</span></div>' +
+          '<div class="opciones" style="max-height:380px;overflow-y:auto">' +
+          salidas
+            .map((m) => opcion('movimiento', m.id, d.movimiento === m.id, '<span class="item-texto"><strong>' + esc(m.descripcion) + '</strong><small>' + (NOMBRE_CUENTA[m.cuenta] || 'Corriente') + ' · Mes ' + m.mes + ' · ' + esc(fechaCorta(m.fecha)) + '</small></span><span class="item-monto negativo">' + esc(dineroDe(m.cuenta, -m.monto)) + '</span>'))
+            .join('') +
+          '</div>'
+        );
+      },
+      leer(c, d) {
+        if (!d.movimiento) throw new B.ErrorBanco('Elige la operación que no reconoces.');
+        return { movimiento: d.movimiento };
+      },
+      resumen(c, d) {
+        const m = c.movimientos.find((x) => x.id === d.movimiento);
+        return [
+          ['Operación', esc(m.descripcion)],
+          ['Cuenta', NOMBRE_CUENTA[m.cuenta] || 'Corriente'],
+          ['Mes', String(m.mes)],
+          ['Monto', esc(dineroDe(m.cuenta, -m.monto)), 'total'],
+        ];
+      },
+      ejecutar(c, d) {
+        const r = B.reportarMovimiento(estado, c.numero, d.movimiento);
+        if (r.acierto) {
+          return {
+            titulo: '¡Encontraste el fraude!',
+            importe: r.fraude.monto,
+            volverA: 'movimientos',
+            nota: 'El banco te devolvió el dinero. Revisar tu historial a menudo te protege.',
+            filas: [['Operación falsa', esc(r.fraude.descripcion)], ['Devuelto a', NOMBRE_CUENTA[r.fraude.cuenta]]],
+          };
+        }
+        return {
+          titulo: 'Esta operación es tuya',
+          azul: true,
+          volverA: 'movimientos',
+          nota: 'El banco revisó y esa operación sí la hiciste tú, por eso no se devuelve. Revisa otra vez tu historial con calma.',
+          filas: [['Operación', esc(r.movimiento.descripcion)], ['Monto', esc(dineroDe(r.movimiento.cuenta, -r.movimiento.monto))]],
+        };
+      },
+    },
+
     clave: {
       titulo: 'Cambiar clave',
       pregunta: 'Crea una clave nueva',
@@ -2135,8 +2381,8 @@
       tipo = 'mover';
       inicial = 'sacar';
     }
-    if (tipo === 'divisas-vender') {
-      tipo = 'divisas';
+    if (tipo === 'divisas-vender' || tipo === 'acciones-vender') {
+      tipo = tipo.replace('-vender', '');
       inicial = 'vender';
     }
     ui.op = { tipo, paso: 'datos', datos: {}, inicial, volver: ui.pantalla };
@@ -2218,6 +2464,7 @@
       kpi('tarjeta', '', 'Tarjetas por cobrar', esc(dinero(t.tarjetas))) +
       kpi('escudo', 'verde', 'En certificados', esc(dinero(t.certificados))) +
       kpi('dolar', 'turquesa', 'Dólares de clientes', esc(usd(t.dolares))) +
+      kpi('grafica', 'turquesa', 'Invertido en la bolsa', esc(dinero(t.inversiones))) +
       kpi('grafica', 'oro', 'Ganancias del banco', esc(dinero(ing.total))) +
       '</div>';
 
@@ -2230,6 +2477,8 @@
       const r = resumenCliente(c);
       if (r.tarjetaMora) atencion.push('<button class="item" data-accion="ver-cliente" data-valor="' + esc(c.numero) + '"><span class="item-icono rojo">' + I('tarjeta') + '</span><span class="item-texto"><strong>' + esc(c.nombre) + '</strong><small>No cubrió el pago mínimo de su tarjeta</small></span>' + I('flecha') + '</button>');
       if (r.atrasadas) atencion.push('<button class="item" data-accion="ver-cliente" data-valor="' + esc(c.numero) + '"><span class="item-icono rojo">' + I('alerta') + '</span><span class="item-texto"><strong>' + esc(c.nombre) + '</strong><small>' + r.atrasadas + ' cuota(s) atrasada(s)</small></span>' + I('flecha') + '</button>');
+      const bloqueadas = c.alertasSeguridad.filter((a) => a.resultado === 'bloqueada' && a.mes === estado.mes).length;
+      if (bloqueadas) atencion.push('<button class="item" data-accion="ver-cliente" data-valor="' + esc(c.numero) + '"><span class="item-icono rojo">' + I('escudo') + '</span><span class="item-texto"><strong>' + esc(c.nombre) + '</strong><small>No reconoció ' + bloqueadas + ' operación(es) este mes</small></span>' + I('flecha') + '</button>');
     });
 
     const actividad = [];
@@ -2256,11 +2505,50 @@
         ? '<div class="lista">' + ranking.map((c, i) => '<div class="item"><span class="avatar chico' + (i ? ' azul' : '') + '">' + (i + 1) + '</span><span class="item-texto"><strong>' + esc(c.nombre) + '</strong><small>' + esc(c.numero) + '</small></span><span class="item-monto positivo">' + esc(dinero(c.saldos.ahorro)) + '</span></div>').join('') + '</div>'
         : '<div class="vacio">' + I('alcancia') + '<p>Nadie ha ahorrado todavía.</p></div>') +
       '</section></div>' +
+      tarjetaMercado() +
+      tarjetaFraudes() +
       '<section class="tarjeta"><div class="tarjeta-cabeza"><h2>Actividad reciente</h2></div>' +
       (actividad.length ? '<ul class="lista">' + actividad.slice(0, 12).map(([m, n]) => itemMovimiento(m, n)).join('') + '</ul>' : '<div class="vacio">' + I('reloj') + '<p>Aún no hay movimientos. Empieza abriendo cuentas.</p><button class="boton chico" style="margin-top:12px" data-accion="seccion" data-valor="clientes">Abrir cuentas</button></div>') +
       '</section></div>';
     return html;
   }
+
+  function tarjetaMercado() {
+    return (
+      '<section class="tarjeta"><div class="tarjeta-cabeza"><h2>Bolsa de valores</h2><span class="etiqueta">Los precios cambian al cerrar el mes</span></div>' +
+      tablaWeb(
+        ['Empresa', 'Historia', 'Este mes', 'Precio'],
+        B.EMPRESAS.map((e) => {
+          const v = B.variacionEmpresa(estado, e.simbolo);
+          return [esc(e.nombre) + ' <small class="simbolo-bolsa">' + e.simbolo + '</small><br><span class="etiqueta ' + COLOR_RIESGO[e.riesgo] + '">' + B.NOMBRE_RIESGO[e.riesgo] + '</span>', miniGrafica(estado.bolsa.historial[e.simbolo]), v.meses ? porcentajeConSigno(v.mes) : '—', esc(dinero(estado.bolsa.precios[e.simbolo]))];
+        })
+      ) +
+      '</section>'
+    );
+  }
+
+  function tarjetaFraudes() {
+    const filas = [];
+    estado.clientes.forEach((c) => c.fraudes.filter((f) => f.estado !== 'cancelado').forEach((f) => filas.push([c, f])));
+    if (!filas.length) return '';
+    return (
+      '<section class="tarjeta"><div class="tarjeta-cabeza"><h2>Actividad: operación sospechosa</h2></div><div class="lista">' +
+      filas
+        .map(([c, f]) => {
+          const hecho = f.estado === 'detectado';
+          return (
+            '<button class="item" data-accion="ver-cliente" data-valor="' + esc(c.numero) + '"><span class="item-icono ' + (hecho ? 'verde' : 'oro') + '">' + I(hecho ? 'check' : 'escudo') + '</span>' +
+            '<span class="item-texto"><strong>' + esc(c.nombre) + '</strong><small>' + esc(f.descripcion) + ' · ' + esc(dinero(f.monto)) + '</small></span>' +
+            '<span class="etiqueta ' + (hecho ? 'verde' : 'oro') + '">' + (hecho ? 'La encontró en el mes ' + f.mesDetectado : 'Sin descubrir') + (f.intentos ? ' · ' + f.intentos + ' error(es)' : '') + '</span></button>'
+          );
+        })
+        .join('') +
+      '</div></section>'
+    );
+  }
+
+  /** Ejemplos de cómo podría verse una operación fraudulenta en el historial. */
+  const EJEMPLOS_FRAUDE = ['Compra en TiendaGlobal.net', 'Pago a JuegosOnline Premium', 'Retiro en cajero de otra ciudad', 'Transferencia a cuenta 9X-771', 'Suscripción StreamMax'];
 
   function dClientes() {
     let html = cabezaEscritorio('Clientes', 'Cuentas abiertas, saldos y claves de acceso.', '<button class="boton chico" data-accion="ir-apertura">' + I('mas1') + 'Abrir cuentas</button>');
@@ -2309,6 +2597,7 @@
         '<div><small>Tarjeta</small><strong>' + (sel.tarjeta ? esc(dinero(B.resumenTarjeta(sel).deuda)) + ' de ' + esc(dinero(sel.tarjeta.limite)) : 'Sin tarjeta') + '</strong></div>' +
         '<div><small>Certificados</small><strong>' + esc(dinero(B.certificadosActivos(sel).reduce((x, k) => x + k.capital, 0))) + '</strong></div>' +
         '<div><small>Dólares</small><strong>' + esc(usd(sel.saldos.dolares)) + '</strong></div>' +
+        '<div><small>Acciones</small><strong>' + esc(dinero(B.resumenInversiones(estado, sel).valor)) + '</strong></div>' +
         '<div><small>Movimientos</small><strong>' + sel.movimientos.length + '</strong></div></div>' +
         '<div class="tarjeta-cuerpo rejilla">' +
         '<form class="formulario" data-form="ajuste"><h3>Premio o multa</h3>' +
@@ -2319,7 +2608,8 @@
         campo('Nueva clave', '<input class="pin" name="pin" inputmode="numeric" maxlength="4" required value="' + pinAleatorio() + '" />', 'llave') +
         '<button class="boton claro">Cambiar clave</button>' +
         '<button type="button" class="boton borde" style="color:var(--rojo)" data-accion="eliminar" data-valor="' + esc(sel.numero) + '">' + I('basura') + 'Cerrar esta cuenta</button></form>' +
-        '</div><div class="tarjeta-cabeza"><h2>Movimientos</h2></div>' + listaMovimientos(sel.movimientos) + '</section>';
+        '</div>' + seguridadCliente(sel) +
+        '<div class="tarjeta-cabeza"><h2>Movimientos</h2></div>' + listaMovimientos(sel.movimientos) + '</section>';
     }
 
     html +=
@@ -2334,6 +2624,44 @@
       '<button class="boton">Abrir todas</button></form>' +
       '</div></section>';
     return html;
+  }
+
+  /** Detalle de seguridad de un cliente: actividad de fraude y alertas que respondió. */
+  function seguridadCliente(sel) {
+    const fraudes = sel.fraudes.filter((f) => f.estado !== 'cancelado');
+    const lista =
+      fraudes.length
+        ? '<div class="lista">' +
+          fraudes
+            .map((f) => {
+              const hecho = f.estado === 'detectado';
+              return (
+                '<div class="item"><span class="item-icono ' + (hecho ? 'verde' : 'oro') + '">' + I(hecho ? 'check' : 'escudo') + '</span><span class="item-texto"><strong>' + esc(f.descripcion) + ' · ' + esc(dinero(f.monto)) + '</strong>' +
+                '<small>' + (f.cuenta === 'tarjeta' ? 'Tarjeta' : 'Corriente') + ' · creada en el mes ' + f.mes + (f.intentos ? ' · reportó ' + f.intentos + ' operación(es) equivocada(s)' : '') + '</small></span>' +
+                (hecho ? '<span class="etiqueta verde">Encontrada (mes ' + f.mesDetectado + ')</span>' : '<button class="boton chico borde" data-accion="cancelar-sospechosa" data-valor="' + esc(f.id) + '">Quitar</button>') +
+                '</div>'
+              );
+            })
+            .join('') +
+          '</div>'
+        : '<p class="ayuda">Todavía no hay operaciones sospechosas para este estudiante.</p>';
+    const alertas = sel.alertasSeguridad.slice(0, 5);
+    return (
+      '<div class="tarjeta-cuerpo rejilla">' +
+      '<form class="formulario" data-form="sospechosa"><h3>Actividad: operación sospechosa</h3>' +
+      '<p class="ayuda">Agrega una operación falsa a su historial. El estudiante debe encontrarla y reportarla desde su app; si acierta, el banco le devuelve el dinero.</p>' +
+      campo('Cómo aparecerá', '<input name="descripcion" list="ejemplos-fraude" maxlength="60" required value="' + esc(EJEMPLOS_FRAUDE[Math.floor(Math.random() * EJEMPLOS_FRAUDE.length)]) + '" />', 'alerta') +
+      '<datalist id="ejemplos-fraude">' + EJEMPLOS_FRAUDE.map((x) => '<option value="' + esc(x) + '"></option>').join('') + '</datalist>' +
+      campo('Monto', '<input name="monto" type="number" min="0.01" step="0.01" required placeholder="0.00" />', 'dinero') +
+      (sel.tarjeta ? radiosSegmento('cuenta', [['corriente', 'Cuenta corriente'], ['tarjeta', 'Tarjeta']], 'corriente', 'Dónde') : '<input type="hidden" name="cuenta" value="corriente" />') +
+      '<button class="boton claro">' + I('escudo') + 'Agregar operación sospechosa</button></form>' +
+      '<div class="formulario"><h3>Seguimiento</h3>' + lista +
+      '<h3 style="margin-top:12px">Alertas de seguridad</h3>' +
+      (alertas.length
+        ? '<div class="lista">' + alertas.map((a) => '<div class="item"><span class="item-icono ' + (a.resultado === 'bloqueada' ? 'rojo' : '') + '">' + I(a.resultado === 'bloqueada' ? 'alerta' : 'check') + '</span><span class="item-texto"><strong>' + esc(a.descripcion) + '</strong><small>Mes ' + a.mes + ' · ' + (a.resultado === 'bloqueada' ? 'No la reconoció: se bloqueó' : 'Confirmó que fue él/ella') + '</small></span></div>').join('') + '</div>'
+        : '<p class="ayuda">Sin alertas. Aparecen cuando hace una operación grande o fuera de lo normal.</p>') +
+      '</div></div>'
+    );
   }
 
   function dSolicitudes() {
@@ -2373,6 +2701,7 @@
       '<div class="item"><span class="item-icono">' + I('tarjeta') + '</span><span class="item-texto"><strong>Hace el corte de las tarjetas</strong><small>mora de ' + esc(dinero(cfg.cargoMoraTarjeta)) + ' si no cubrieron el mínimo e interés de ' + cfg.tasaTarjetaMensual + '% sobre lo no pagado</small></span></div>' +
       '<div class="item"><span class="item-icono morado">' + I('prestamo') + '</span><span class="item-texto"><strong>Cobra la cuota de cada préstamo</strong><small>desde la cuenta corriente; si no hay saldo, la cuota queda atrasada y se suma una mora de ' + esc(dinero(cfg.cargoMoraPrestamo)) + '</small></span></div>' +
       '<div class="item"><span class="item-icono rojo">' + I('alerta') + '</span><span class="item-texto"><strong>Cobra mantenimiento de ' + esc(dinero(cfg.cargoMantenimiento)) + '</strong><small>a las cuentas corrientes con menos de ' + esc(dinero(cfg.saldoMinimo)) + '</small></span></div>' +
+      '<div class="item"><span class="item-icono turquesa">' + I('grafica') + '</span><span class="item-texto"><strong>Mueve los precios de la bolsa</strong><small>cada empresa sube o baja al azar según su riesgo: bajo, medio o alto</small></span></div>' +
       '<button class="boton" style="max-width:320px" data-accion="cerrar-mes">' + I('calendario') + 'Cerrar el mes ' + estado.mes + '</button></div></section>';
     if (estado.historialMeses.length) {
       html +=
@@ -2444,6 +2773,7 @@
           campo('El banco compra el dólar a', num('tasaCompraUSD', cfg.tasaCompraUSD, 'min="0.01" step="0.01"'), 'dolar') +
           campo('El banco vende el dólar a', num('tasaVentaUSD', cfg.tasaVentaUSD, 'min="0.01" step="0.01"'), 'dolar')
       ) +
+      grupo('Bolsa y seguridad', pct('comisionBolsa', 'Comisión de bolsa (%)') + m('umbralAlerta', 'Pedir confirmación desde (0 = solo por costumbre)', 'escudo')) +
       '<div class="aviso-banner azul">' + I('info') + '<span>Los cambios de tasa aplican a productos nuevos. Los préstamos, tarjetas y certificados ya abiertos mantienen su tasa. Pon un cargo en 0 para no cobrarlo.</span></div>' +
       '<button class="boton" style="max-width:260px">Guardar reglas</button></form></section>' +
       '<div class="rejilla">' +
@@ -2551,10 +2881,11 @@
         manejarError(e);
       }
     },
-    'op-confirmar'(d) {
+    async 'op-confirmar'(d) {
       const c = clienteActual();
       const spec = OPS[ui.op.tipo];
       if (!spec.sinClave && c.pin !== String(d.pin || '').trim()) return avisar('La clave no es correcta.', true);
+      if (OPS_VIGILADAS[ui.op.tipo] && !(await confirmarSiEsInusual(c, ui.op.tipo, ui.op.datos.monto))) return;
       ejecutarOperacion(c, spec);
     },
     'abrir-cuenta'(d) {
@@ -2593,6 +2924,9 @@
     'cambiar-pin'(d) {
       operar(() => B.cambiarPin(estado, ui.seleccion, d.pin), 'Clave actualizada.');
     },
+    sospechosa(d) {
+      operar(() => B.crearOperacionSospechosa(estado, ui.seleccion, B.aCentavos(d.monto), d.descripcion, d.cuenta), 'Operación sospechosa agregada. Pide al estudiante que revise su historial.');
+    },
     config(d) {
       const plazos = (t) => String(t).split(/[,;\s]+/).filter(Boolean).map(Number).sort((a, b) => a - b);
       const cambios = { nombreBanco: d.nombreBanco.trim(), simbolo: d.simbolo.trim(), pinDocente: d.pinDocente, plazosPrestamo: plazos(d.plazosPrestamo), plazosCertificado: plazos(d.plazosCertificado) };
@@ -2604,8 +2938,31 @@
     },
   };
 
-  const CAMPOS_MONTO = ['saldoInicial', 'saldoMinimo', 'cargoMantenimiento', 'comisionRetiro', 'comisionTransferencia', 'montoMaximoPrestamo', 'cargoMoraPrestamo', 'limiteTarjeta', 'pagoMinimoFijo', 'cargoMoraTarjeta', 'cuotaEmisionTarjeta', 'montoMinimoCertificado'];
-  const CAMPOS_NUMERO = ['tasaAhorroMensual', 'impuestoTransaccion', 'tasaPrestamoMensual', 'tasaPrestamoEducativo', 'tasaPrestamoEmprendimiento', 'comisionApertura', 'tasaTarjetaMensual', 'pagoMinimoPorcentaje', 'comisionAvance', 'tasaCertificadoMensual', 'penalidadCertificado', 'tasaCompraUSD', 'tasaVentaUSD'];
+  const CAMPOS_MONTO = ['saldoInicial', 'saldoMinimo', 'cargoMantenimiento', 'comisionRetiro', 'comisionTransferencia', 'montoMaximoPrestamo', 'cargoMoraPrestamo', 'limiteTarjeta', 'pagoMinimoFijo', 'cargoMoraTarjeta', 'cuotaEmisionTarjeta', 'montoMinimoCertificado', 'umbralAlerta'];
+  const CAMPOS_NUMERO = ['tasaAhorroMensual', 'impuestoTransaccion', 'tasaPrestamoMensual', 'tasaPrestamoEducativo', 'tasaPrestamoEmprendimiento', 'comisionApertura', 'tasaTarjetaMensual', 'pagoMinimoPorcentaje', 'comisionAvance', 'tasaCertificadoMensual', 'penalidadCertificado', 'comisionBolsa', 'tasaCompraUSD', 'tasaVentaUSD'];
+
+  /** Salidas de dinero que el banco revisa antes de hacerlas. */
+  const OPS_VIGILADAS = { transferencia: 'Transferencia', retiro: 'Retiro', compra: 'Compra con tarjeta', avance: 'Avance de efectivo' };
+
+  /** Si la operación es inusual, pregunta "¿Reconoces esta operación?". Devuelve true si se puede seguir. */
+  async function confirmarSiEsInusual(c, tipo, monto) {
+    const r = B.revisarOperacion(estado, c, monto);
+    if (!r.inusual) return true;
+    const descripcion = OPS_VIGILADAS[tipo] + ' de ' + dinero(monto);
+    const ok = await hoja({
+      icono: 'escudo',
+      titulo: '¿Reconoces esta operación?',
+      texto: 'Detectamos algo inusual en tu cuenta: <strong>' + esc(descripcion) + '</strong>.<br>' + r.motivos.map(esc).join('<br>') + '<br><br>Si alguien más está usando tu cuenta, toca <strong>No la reconozco</strong>.',
+      ok: 'Sí, fui yo',
+      cancelar: 'No la reconozco',
+    });
+    B.registrarAlerta(estado, c.numero, descripcion, monto, ok ? 'confirmada' : 'bloqueada');
+    guardar();
+    if (ok) return true;
+    await hoja({ peligro: true, icono: 'llave', titulo: 'Operación bloqueada', texto: 'No se movió tu dinero. Cambia tu clave ahora y avisa al docente (tu banco).', ok: 'Cambiar mi clave', soloOk: true });
+    abrirOperacion('clave');
+    return false;
+  }
 
   function ejecutarOperacion(c, spec) {
     try {
@@ -2732,6 +3089,7 @@
     'terminar-op'() {
       const destino = ui.op && ui.op.recibo && ui.op.recibo.volverA;
       if (destino === 'producto') ui.producto = 'tarjeta';
+      if (destino && destino !== 'producto') ui.pila = [];
       irA(destino || 'inicio');
     },
     'monto-rapido'(v, el) {
@@ -2804,6 +3162,10 @@
       ui.nuevasCuentas = null;
       pintar();
     },
+    async 'cancelar-sospechosa'(v) {
+      const ok = await hoja({ titulo: '¿Quitar la operación sospechosa?', texto: 'Se le devolverá el dinero al estudiante y la actividad terminará.', ok: 'Quitar' });
+      if (ok) operar(() => B.cancelarOperacionSospechosa(estado, ui.seleccion, v), 'Actividad quitada y dinero devuelto.');
+    },
     aprobar(v) {
       operar(() => B.aprobarPrestamo(estado, v), 'Préstamo aprobado. El dinero ya está en la cuenta del estudiante.');
     },
@@ -2823,7 +3185,7 @@
       }
     },
     async 'cerrar-mes'() {
-      const ok = await hoja({ icono: 'calendario', titulo: '¿Cerrar el mes ' + estado.mes + '?', texto: 'Se pagarán los intereses del ahorro y los certificados, se hará el corte de las tarjetas y se cobrarán cuotas, moras y mantenimiento.', ok: 'Cerrar mes' });
+      const ok = await hoja({ icono: 'calendario', titulo: '¿Cerrar el mes ' + estado.mes + '?', texto: 'Se pagarán los intereses del ahorro y los certificados, se hará el corte de las tarjetas, se cobrarán cuotas, moras y mantenimiento, y cambiarán los precios de la bolsa.', ok: 'Cerrar mes' });
       if (!ok) return;
       operar(
         () => B.avanzarMes(estado),
@@ -2885,6 +3247,12 @@
 
   document.addEventListener('change', (e) => {
     const t = e.target;
+    if (t.form && t.form.dataset.form === 'op-datos' && t.name === 'operacion' && ui.op.tipo === 'acciones') {
+      // Comprar y vender muestran empresas distintas: se vuelve a pintar el formulario.
+      ui.op.datos = Object.fromEntries(new FormData(t.form).entries());
+      ui.op.inicial = t.value;
+      return pintar();
+    }
     if (t.form && t.form.dataset.form === 'op-datos') actualizarVistaPrevia(t.form);
     if (t.hasAttribute('data-importar') && t.files[0]) importarArchivo(t);
   });

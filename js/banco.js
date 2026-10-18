@@ -6,7 +6,8 @@
  * en % (mensual cuando se trata de intereses).
  *
  * Departamentos: cuentas (corriente, ahorro y dólares), tarjeta de crédito,
- * préstamos, certificados de depósito y divisas.
+ * préstamos, certificados de depósito, divisas, bolsa de valores simulada y
+ * seguridad (alertas de operaciones inusuales y reporte de fraudes).
  *
  * Este archivo funciona en el navegador (window.Banco) y en Node (para pruebas).
  */
@@ -59,7 +60,31 @@
     // Divisas (₵ por cada US$1)
     tasaCompraUSD: 58.5, // el banco compra dólares a este precio
     tasaVentaUSD: 60.5, // el banco vende dólares a este precio
+
+    // Bolsa de valores
+    comisionBolsa: 1, // % de cada compra o venta de acciones
+
+    // Seguridad
+    umbralAlerta: 50000, // ₵500.00: operaciones desde este monto piden confirmación (0 = sin límite)
   };
+
+  /**
+   * Empresas ficticias de la bolsa. Cada mes el precio cambia al azar:
+   * tendencia = lo que suele subir al mes (%), variacion = cuánto puede moverse arriba o abajo (%).
+   */
+  const EMPRESAS = [
+    { simbolo: 'JUGO', nombre: 'Jugos Tropicales', sector: 'Alimentos', riesgo: 'bajo', precio: 5000, tendencia: 0.8, variacion: 3 },
+    { simbolo: 'LIBR', nombre: 'Editorial Aula', sector: 'Educación', riesgo: 'bajo', precio: 8000, tendencia: 0.7, variacion: 4 },
+    { simbolo: 'RUTA', nombre: 'Transporte Escolar', sector: 'Transporte', riesgo: 'medio', precio: 12000, tendencia: 1.1, variacion: 8 },
+    { simbolo: 'SOLR', nombre: 'Energía Solar Caribe', sector: 'Energía', riesgo: 'medio', precio: 15000, tendencia: 1.3, variacion: 10 },
+    { simbolo: 'CHIP', nombre: 'TecnoChips', sector: 'Tecnología', riesgo: 'alto', precio: 20000, tendencia: 1.6, variacion: 18 },
+    { simbolo: 'GAME', nombre: 'Videojuegos Pixel', sector: 'Entretenimiento', riesgo: 'alto', precio: 9000, tendencia: 1.4, variacion: 20 },
+  ];
+
+  const NOMBRE_RIESGO = { bajo: 'Riesgo bajo', medio: 'Riesgo medio', alto: 'Riesgo alto' };
+
+  /** Operaciones de salida de dinero que se revisan para detectar algo inusual. */
+  const TIPOS_GASTO = ['retiro', 'transferencia', 'compra', 'avance', 'pago'];
 
   const TIPOS_PRESTAMO = {
     personal: { nombre: 'Personal', tasa: 'tasaPrestamoMensual' },
@@ -127,7 +152,18 @@
       clientes: [],
       solicitudes: [],
       historialMeses: [],
+      bolsa: bolsaInicial(),
     };
+  }
+
+  function bolsaInicial() {
+    const precios = {};
+    const historial = {};
+    EMPRESAS.forEach((e) => {
+      precios[e.simbolo] = e.precio;
+      historial[e.simbolo] = [e.precio];
+    });
+    return { precios, historial, semilla: 20261018 };
   }
 
   /** Completa datos que no existían en versiones anteriores de la app. */
@@ -136,6 +172,10 @@
       c.saldos = Object.assign({ corriente: 0, ahorro: 0, dolares: 0, tarjeta: 0 }, c.saldos);
       if (c.tarjeta === undefined) c.tarjeta = null;
       if (!Array.isArray(c.certificados)) c.certificados = [];
+      if (!c.acciones || typeof c.acciones !== 'object') c.acciones = {};
+      if (!Array.isArray(c.fraudes)) c.fraudes = [];
+      if (!Array.isArray(c.alertasSeguridad)) c.alertasSeguridad = [];
+      if (!c.reportesFallidos) c.reportesFallidos = 0;
       c.prestamos.forEach((p) => {
         if (!p.tipo) p.tipo = 'personal';
         if (!p.sistema) p.sistema = 'frances';
@@ -146,6 +186,13 @@
       if (!s.tipo) s.tipo = 'personal';
       if (!s.sistema) s.sistema = 'frances';
     });
+    if (!estado.bolsa || !estado.bolsa.precios) estado.bolsa = bolsaInicial();
+    const base = bolsaInicial();
+    EMPRESAS.forEach((e) => {
+      if (!estado.bolsa.precios[e.simbolo]) estado.bolsa.precios[e.simbolo] = e.precio;
+      if (!Array.isArray(estado.bolsa.historial[e.simbolo])) estado.bolsa.historial[e.simbolo] = [estado.bolsa.precios[e.simbolo]];
+    });
+    if (!Number.isInteger(estado.bolsa.semilla)) estado.bolsa.semilla = base.semilla;
     return estado;
   }
 
@@ -224,6 +271,10 @@
       prestamos: [],
       certificados: [],
       tarjeta: null,
+      acciones: {},
+      fraudes: [],
+      alertasSeguridad: [],
+      reportesFallidos: 0,
       movimientos: [],
     };
     estado.clientes.push(cliente);
@@ -695,6 +746,193 @@
     return c;
   }
 
+  // ---------- Bolsa de valores (simulada) ----------
+
+  function buscarEmpresa(simbolo) {
+    const empresa = EMPRESAS.find((e) => e.simbolo === simbolo);
+    if (!empresa) falla('Elige una empresa de la bolsa.');
+    return empresa;
+  }
+
+  function cantidadAcciones(cantidad) {
+    cantidad = Number(cantidad);
+    if (!Number.isInteger(cantidad) || cantidad <= 0) falla('Escribe una cantidad entera de acciones (1, 2, 3…).');
+    return cantidad;
+  }
+
+  /** Precio de una compra o venta de acciones, con la comisión del corredor. */
+  function cotizarAcciones(estado, simbolo, cantidad, operacion) {
+    buscarEmpresa(simbolo);
+    const precio = estado.bolsa.precios[simbolo];
+    const valor = precio * cantidad;
+    const comision = porcentaje(valor, estado.config.comisionBolsa);
+    return { precio, valor, comision, total: operacion === 'vender' ? valor - comision : valor + comision };
+  }
+
+  function comprarAcciones(estado, numero, simbolo, cantidad) {
+    const cliente = buscarCliente(estado, numero);
+    const empresa = buscarEmpresa(simbolo);
+    cantidad = cantidadAcciones(cantidad);
+    const q = cotizarAcciones(estado, simbolo, cantidad, 'comprar');
+    if (q.total > cliente.saldos.corriente) falla('Necesitas ' + formatear(q.total, estado.config.simbolo) + ' en tu cuenta corriente.');
+    const posicion = cliente.acciones[simbolo] || { cantidad: 0, costo: 0 };
+    posicion.cantidad += cantidad;
+    posicion.costo += q.valor;
+    cliente.acciones[simbolo] = posicion;
+    registrar(estado, cliente, 'corriente', -q.valor, 'inversion', 'Compra de ' + cantidad + ' acción(es) de ' + empresa.nombre + ' a ' + formatear(q.precio, estado.config.simbolo));
+    if (q.comision > 0) registrar(estado, cliente, 'corriente', -q.comision, 'comision', 'Comisión de bolsa (' + estado.config.comisionBolsa + '%)');
+    return q;
+  }
+
+  function venderAcciones(estado, numero, simbolo, cantidad) {
+    const cliente = buscarCliente(estado, numero);
+    const empresa = buscarEmpresa(simbolo);
+    cantidad = cantidadAcciones(cantidad);
+    const posicion = cliente.acciones[simbolo];
+    if (!posicion || posicion.cantidad < cantidad) falla('Solo tienes ' + (posicion ? posicion.cantidad : 0) + ' acción(es) de ' + empresa.nombre + '.');
+    const q = cotizarAcciones(estado, simbolo, cantidad, 'vender');
+    // El costo de lo vendido es proporcional: así se calcula si se ganó o se perdió.
+    const costoVendido = Math.round((posicion.costo * cantidad) / posicion.cantidad);
+    posicion.costo -= costoVendido;
+    posicion.cantidad -= cantidad;
+    if (posicion.cantidad === 0) delete cliente.acciones[simbolo];
+    registrar(estado, cliente, 'corriente', q.valor, 'inversion', 'Venta de ' + cantidad + ' acción(es) de ' + empresa.nombre + ' a ' + formatear(q.precio, estado.config.simbolo));
+    if (q.comision > 0) registrar(estado, cliente, 'corriente', -q.comision, 'comision', 'Comisión de bolsa (' + estado.config.comisionBolsa + '%)');
+    q.ganancia = q.valor - costoVendido;
+    return q;
+  }
+
+  /** Lo que valen hoy las acciones de un cliente y cuánto ha ganado o perdido. */
+  function resumenInversiones(estado, cliente) {
+    const posiciones = Object.keys(cliente.acciones || {})
+      .filter((s) => cliente.acciones[s].cantidad > 0)
+      .map((s) => {
+        const p = cliente.acciones[s];
+        const valor = (estado.bolsa.precios[s] || 0) * p.cantidad;
+        return { simbolo: s, empresa: EMPRESAS.find((e) => e.simbolo === s), cantidad: p.cantidad, costo: p.costo, valor, ganancia: valor - p.costo, porcentaje: p.costo ? ((valor - p.costo) / p.costo) * 100 : 0 };
+      });
+    const valor = posiciones.reduce((s, p) => s + p.valor, 0);
+    const costo = posiciones.reduce((s, p) => s + p.costo, 0);
+    return { posiciones, valor, costo, ganancia: valor - costo, porcentaje: costo ? ((valor - costo) / costo) * 100 : 0 };
+  }
+
+  /** Cambio de precio de una empresa: en el último mes y desde que abrió la bolsa (en %). */
+  function variacionEmpresa(estado, simbolo) {
+    const h = estado.bolsa.historial[simbolo] || [];
+    const actual = estado.bolsa.precios[simbolo];
+    const anterior = h.length > 1 ? h[h.length - 2] : actual;
+    const inicio = h.length ? h[0] : actual;
+    return { mes: anterior ? ((actual - anterior) / anterior) * 100 : 0, total: inicio ? ((actual - inicio) / inicio) * 100 : 0, meses: Math.max(0, h.length - 1) };
+  }
+
+  /** Número al azar entre 0 y 1 que se puede repetir (la semilla se guarda con el banco). */
+  function aleatorio(estado) {
+    let t = (estado.bolsa.semilla = (estado.bolsa.semilla + 0x6d2b79f5) | 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  /** Mueve los precios de la bolsa un mes: tendencia ± variación al azar. Nunca baja de ₵1.00. */
+  function moverMercado(estado) {
+    const cambios = [];
+    EMPRESAS.forEach((e) => {
+      const antes = estado.bolsa.precios[e.simbolo];
+      const pct = e.tendencia + e.variacion * (aleatorio(estado) * 2 - 1);
+      const despues = Math.max(100, Math.round(antes * (1 + pct / 100)));
+      estado.bolsa.precios[e.simbolo] = despues;
+      estado.bolsa.historial[e.simbolo].push(despues);
+      cambios.push({ simbolo: e.simbolo, antes, despues });
+    });
+    return cambios;
+  }
+
+  // ---------- Seguridad: alertas y fraudes ----------
+
+  /**
+   * Revisa si una salida de dinero es inusual para este cliente:
+   * - llega al monto de alerta del banco, o
+   * - es más de 3 veces su gasto promedio (con al menos 3 operaciones anteriores).
+   */
+  function revisarOperacion(estado, cliente, centavos) {
+    const cfg = estado.config;
+    const motivos = [];
+    if (cfg.umbralAlerta > 0 && centavos >= cfg.umbralAlerta) motivos.push('Es de ' + formatear(cfg.umbralAlerta, cfg.simbolo) + ' o más.');
+    const previos = cliente.movimientos.filter((m) => TIPOS_GASTO.includes(m.tipo) && m.monto < 0).slice(0, 10);
+    const promedio = previos.length ? Math.round(previos.reduce((s, m) => s - m.monto, 0) / previos.length) : 0;
+    if (previos.length >= 3 && centavos > promedio * 3) motivos.push('Es más de 3 veces lo que sueles gastar (tu promedio es ' + formatear(promedio, cfg.simbolo) + ').');
+    return { inusual: motivos.length > 0, motivos, promedio };
+  }
+
+  /** Guarda qué respondió el cliente ante una alerta: "confirmada" (fue él) o "bloqueada" (no la reconoce). */
+  function registrarAlerta(estado, numero, descripcion, centavos, resultado) {
+    const cliente = buscarCliente(estado, numero);
+    cliente.alertasSeguridad.unshift({ mes: estado.mes, fecha: new Date().toISOString(), descripcion: String(descripcion || ''), monto: centavos, resultado });
+  }
+
+  /** Tipo de movimiento que se usará para que la operación sospechosa parezca real. */
+  function tipoSospechosa(cuenta, descripcion) {
+    if (cuenta === 'tarjeta') return 'compra';
+    if (/^retiro/i.test(descripcion)) return 'retiro';
+    if (/^transferencia/i.test(descripcion)) return 'transferencia';
+    return 'pago';
+  }
+
+  /** Actividad del docente: mete una operación falsa en la cuenta de un estudiante para que la encuentre. */
+  function crearOperacionSospechosa(estado, numero, centavos, descripcion, cuenta) {
+    const cliente = buscarCliente(estado, numero);
+    montoPositivo(centavos);
+    cuenta = cuenta === 'tarjeta' ? 'tarjeta' : 'corriente';
+    descripcion = String(descripcion || '').trim();
+    if (descripcion.length < 3) falla('Escribe cómo aparecerá la operación en el historial.');
+    if (cuenta === 'tarjeta') {
+      const r = exigirTarjeta(cliente);
+      if (centavos > r.disponible) falla('El monto supera el crédito disponible de la tarjeta (' + formatear(r.disponible, estado.config.simbolo) + ').');
+    } else if (centavos > cliente.saldos.corriente) {
+      falla('El monto supera el saldo de su cuenta corriente (' + formatear(cliente.saldos.corriente, estado.config.simbolo) + ').');
+    }
+    registrar(estado, cliente, cuenta, -centavos, tipoSospechosa(cuenta, descripcion), descripcion);
+    const fraude = { id: nuevoId(estado, 'f'), movimiento: cliente.movimientos[0].id, monto: centavos, cuenta, descripcion, mes: estado.mes, estado: 'pendiente', mesDetectado: null, intentos: 0 };
+    cliente.fraudes.push(fraude);
+    return fraude;
+  }
+
+  function devolverFraude(estado, cliente, fraude, descripcion) {
+    registrar(estado, cliente, fraude.cuenta, fraude.monto, 'reembolso', descripcion);
+    // Si la operación ya entró en un corte de la tarjeta, la devolución cuenta como pago de ese corte.
+    if (fraude.cuenta === 'tarjeta' && cliente.tarjeta && cliente.tarjeta.mesCorte != null && fraude.mes <= cliente.tarjeta.mesCorte) cliente.tarjeta.pagosDesdeCorte += fraude.monto;
+  }
+
+  /**
+   * El estudiante reporta un movimiento que no reconoce.
+   * Si es la operación sospechosa, el banco le devuelve el dinero. Si no, era una operación suya.
+   */
+  function reportarMovimiento(estado, numero, idMovimiento) {
+    const cliente = buscarCliente(estado, numero);
+    const mov = cliente.movimientos.find((m) => m.id === idMovimiento);
+    if (!mov || mov.monto >= 0) falla('Elige una salida de dinero de tu historial.');
+    const fraude = cliente.fraudes.find((f) => f.movimiento === idMovimiento);
+    if (fraude && fraude.estado !== 'pendiente') falla('Esa operación ya fue reportada.');
+    if (!fraude) {
+      cliente.reportesFallidos++;
+      cliente.fraudes.filter((f) => f.estado === 'pendiente').forEach((f) => f.intentos++);
+      return { acierto: false, movimiento: mov };
+    }
+    fraude.estado = 'detectado';
+    fraude.mesDetectado = estado.mes;
+    devolverFraude(estado, cliente, fraude, 'Reembolso por fraude reportado: ' + fraude.descripcion);
+    return { acierto: true, movimiento: mov, fraude };
+  }
+
+  /** El docente quita una operación sospechosa que nadie ha encontrado: se devuelve el dinero. */
+  function cancelarOperacionSospechosa(estado, numero, idFraude) {
+    const cliente = buscarCliente(estado, numero);
+    const fraude = cliente.fraudes.find((f) => f.id === idFraude);
+    if (!fraude || fraude.estado !== 'pendiente') falla('Esa actividad ya terminó.');
+    fraude.estado = 'cancelado';
+    devolverFraude(estado, cliente, fraude, 'Corrección del banco: ' + fraude.descripcion);
+  }
+
   // ---------- Cierre de mes ----------
 
   /**
@@ -703,6 +941,7 @@
    * 2. Hace el corte de las tarjetas de crédito.
    * 3. Vence una cuota de cada préstamo y la cobra si hay saldo; si no, cobra mora.
    * 4. Cobra el mantenimiento de las cuentas con saldo menor al mínimo.
+   * 5. Mueve los precios de la bolsa de valores.
    */
   function avanzarMes(estado) {
     const cfg = estado.config;
@@ -750,6 +989,7 @@
       }
     });
     resumen.cargosCobrados = ingresosBanco(estado).total - ingresosAntes;
+    resumen.bolsa = moverMercado(estado);
     estado.historialMeses.unshift(resumen);
     estado.mes++;
     return resumen;
@@ -757,8 +997,8 @@
 
   // ---------- Docente ----------
 
-  const CLAVES_MONTO = ['saldoInicial', 'saldoMinimo', 'cargoMantenimiento', 'comisionRetiro', 'comisionTransferencia', 'montoMaximoPrestamo', 'cargoMoraPrestamo', 'limiteTarjeta', 'pagoMinimoFijo', 'cargoMoraTarjeta', 'cuotaEmisionTarjeta', 'montoMinimoCertificado'];
-  const CLAVES_PORCENTAJE = ['tasaAhorroMensual', 'impuestoTransaccion', 'tasaPrestamoMensual', 'tasaPrestamoEducativo', 'tasaPrestamoEmprendimiento', 'comisionApertura', 'tasaTarjetaMensual', 'pagoMinimoPorcentaje', 'comisionAvance', 'tasaCertificadoMensual', 'penalidadCertificado'];
+  const CLAVES_MONTO = ['saldoInicial', 'saldoMinimo', 'cargoMantenimiento', 'comisionRetiro', 'comisionTransferencia', 'montoMaximoPrestamo', 'cargoMoraPrestamo', 'limiteTarjeta', 'pagoMinimoFijo', 'cargoMoraTarjeta', 'cuotaEmisionTarjeta', 'montoMinimoCertificado', 'umbralAlerta'];
+  const CLAVES_PORCENTAJE = ['tasaAhorroMensual', 'impuestoTransaccion', 'tasaPrestamoMensual', 'tasaPrestamoEducativo', 'tasaPrestamoEmprendimiento', 'comisionApertura', 'tasaTarjetaMensual', 'pagoMinimoPorcentaje', 'comisionAvance', 'tasaCertificadoMensual', 'penalidadCertificado', 'comisionBolsa'];
 
   function actualizarConfig(estado, cambios) {
     const cfg = Object.assign({}, estado.config, cambios);
@@ -802,7 +1042,7 @@
   }
 
   function totales(estado) {
-    const t = { corriente: 0, ahorro: 0, dolares: 0, deuda: 0, tarjetas: 0, certificados: 0, clientes: estado.clientes.length };
+    const t = { corriente: 0, ahorro: 0, dolares: 0, deuda: 0, tarjetas: 0, certificados: 0, inversiones: 0, clientes: estado.clientes.length };
     estado.clientes.forEach((c) => {
       t.corriente += c.saldos.corriente;
       t.ahorro += c.saldos.ahorro;
@@ -810,6 +1050,7 @@
       t.tarjetas += Math.max(0, -c.saldos.tarjeta);
       c.prestamos.forEach((p) => (t.deuda += resumenPrestamo(p).saldoPendiente));
       certificadosActivos(c).forEach((cert) => (t.certificados += cert.capital));
+      t.inversiones += resumenInversiones(estado, c).valor;
     });
     return t;
   }
@@ -839,6 +1080,8 @@
     TIPOS_PRESTAMO,
     SISTEMAS,
     SIMBOLO_USD,
+    EMPRESAS,
+    NOMBRE_RIESGO,
     ErrorBanco,
     aCentavos,
     aUnidades,
@@ -882,6 +1125,17 @@
     cotizarDivisa,
     comprarDolares,
     venderDolares,
+    cotizarAcciones,
+    comprarAcciones,
+    venderAcciones,
+    resumenInversiones,
+    variacionEmpresa,
+    moverMercado,
+    revisarOperacion,
+    registrarAlerta,
+    crearOperacionSospechosa,
+    reportarMovimiento,
+    cancelarOperacionSospechosa,
     avanzarMes,
     actualizarConfig,
     ingresosBanco,

@@ -17,6 +17,8 @@ La app está organizada por **departamentos**: cuentas, tarjeta de crédito, pr�
 - **Préstamos**: personal, educativo o de emprendimiento, con sistema **francés** (cuota fija) o **alemán** (capital fijo), tabla de amortización, comisión de apertura y mora.
 - **Certificados de depósito**: plazo fijo con interés simple o compuesto, comparación de ambos y penalidad por cancelar antes de tiempo.
 - **Divisas**: comprar y vender dólares con tasa de compra y de venta (diferencial cambiario).
+- **Bolsa de valores**: comprar y vender acciones de 6 empresas inventadas (riesgo bajo, medio o alto). Los precios suben o bajan al cerrar el mes; el estudiante ve cuánto gana o pierde y compara las acciones con un certificado (riesgo vs. rendimiento).
+- **Seguridad**: si una transferencia, retiro o compra es muy grande o muy distinta a lo que el estudiante suele gastar, la app pregunta "¿Reconoces esta operación?". Si dice que no, la operación se bloquea y se le pide cambiar su clave. Desde el historial puede **reportar una operación que no reconoce**.
 - **Calculadoras**: interés simple, compuesto, ahorro programado (anualidad), tasas equivalentes y comparación francés vs. alemán, con su fórmula.
 - **Tarifario**: todos los cargos del banco en un solo lugar.
 - Historial de movimientos, ocultar saldos, cambio de clave y sección de educación financiera.
@@ -27,7 +29,9 @@ La app está organizada por **departamentos**: cuentas, tarjeta de crédito, pr�
 - Abrir cuentas una por una o pegando toda la lista del curso (la clave se crea sola y se puede imprimir).
 - Ver cada cliente, dar premios o multas, cambiar su clave, cerrar su cuenta y **ver su app como la ve el estudiante**.
 - Aprobar o rechazar solicitudes de préstamo.
-- **Cerrar el mes**: paga intereses del ahorro y los certificados, hace el corte de las tarjetas (mora e intereses), cobra cuotas de préstamos (mora si no hay saldo) y el mantenimiento de cuentas con saldo bajo.
+- **Actividad de operación sospechosa**: en la ficha de un estudiante, agregar una operación falsa a su historial. El estudiante debe encontrarla y reportarla; si acierta, el banco le devuelve el dinero. El panel muestra quién la encontró y cuántos errores tuvo, además de las alertas de seguridad que respondió.
+- Ver los precios de la bolsa y cuánto han invertido los estudiantes.
+- **Cerrar el mes**: paga intereses del ahorro y los certificados, hace el corte de las tarjetas (mora e intereses), cobra cuotas de préstamos (mora si no hay saldo), el mantenimiento de cuentas con saldo bajo y mueve los precios de la bolsa.
 - Cambiar todas las tasas y tarifas, y descargar o cargar copias de seguridad.
 
 ## Cargos y tasas iniciales
@@ -47,6 +51,8 @@ La app está organizada por **departamentos**: cuentas, tarjeta de crédito, pr�
 | Tarjeta | Mora / avance / emisión | ₵100.00 / 5% / ₵100.00 |
 | Certificados | Tasa / mínimo / penalidad | 1.5% mensual / ₵500.00 / 2% |
 | Divisas | Compra / venta del dólar | 58.50 / 60.50 |
+| Bolsa | Comisión por compra o venta | 1% |
+| Seguridad | Pedir confirmación desde | ₵500.00 o 3 veces el gasto normal |
 
 Todas se pueden cambiar en **Panel docente → Ajustes**.
 
