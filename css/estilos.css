@@ -3106,3 +3106,38 @@ button.web-bloque:hover {
     padding: 18px 14px 40px;
   }
 }
+
+/* ---------- Bolsa de valores ---------- */
+
+.producto.bolsa {
+  background: linear-gradient(135deg, #f08a24, #a94c06);
+}
+
+.mini-grafica {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 22px;
+}
+
+.mini-grafica.vacia {
+  width: auto;
+  height: auto;
+  font-size: 0.72rem;
+  color: var(--suave);
+}
+
+.simbolo-bolsa {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--suave);
+}
+
+/* En el celular no cabe la gráfica junto al nombre: se ve en la computadora. */
+.movil .mini-grafica {
+  display: none;
+}
+
+.item-texto .etiqueta {
+  white-space: nowrap;
+}

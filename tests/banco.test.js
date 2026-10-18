@@ -319,3 +319,119 @@ test('copias antiguas se completan con los datos nuevos', () => {
   assert.equal(e.clientes[0].tarjeta, null);
   assert.equal(e.config.limiteTarjeta, 150000);
 });
+
+test('bolsa: compra y venta de acciones con comisión y ganancia', () => {
+  const { e, ana } = bancoConDos();
+  // JUGO empieza a ₵50.00 y la comisión de bolsa es 1%.
+  const q = B.comprarAcciones(e, ana.numero, 'JUGO', 4);
+  assert.equal(q.valor, 20000);
+  assert.equal(q.comision, 200);
+  assert.equal(ana.saldos.corriente, 100000 - 20200);
+  assert.deepEqual(ana.acciones.JUGO, { cantidad: 4, costo: 20000 });
+
+  e.bolsa.precios.JUGO = 6000; // sube a ₵60.00
+  const r = B.resumenInversiones(e, ana);
+  assert.equal(r.valor, 24000);
+  assert.equal(r.ganancia, 4000);
+  assert.equal(B.totales(e).inversiones, 24000);
+
+  const v = B.venderAcciones(e, ana.numero, 'JUGO', 2);
+  assert.equal(v.valor, 12000);
+  assert.equal(v.ganancia, 2000);
+  assert.equal(ana.saldos.corriente, 100000 - 20200 + 12000 - 120);
+  assert.deepEqual(ana.acciones.JUGO, { cantidad: 2, costo: 10000 });
+
+  B.venderAcciones(e, ana.numero, 'JUGO', 2);
+  assert.equal(ana.acciones.JUGO, undefined);
+  assert.throws(() => B.venderAcciones(e, ana.numero, 'JUGO', 1), /Solo tienes 0/);
+  assert.throws(() => B.comprarAcciones(e, ana.numero, 'JUGO', 1.5), /entera/);
+  assert.throws(() => B.comprarAcciones(e, ana.numero, 'NADA', 1), /empresa/);
+  assert.throws(() => B.comprarAcciones(e, ana.numero, 'CHIP', 100), /Necesitas/);
+});
+
+test('bolsa: el cierre de mes mueve los precios y guarda el historial', () => {
+  const { e } = bancoConDos();
+  const antes = Object.assign({}, e.bolsa.precios);
+  B.avanzarMes(e);
+  B.avanzarMes(e);
+  B.EMPRESAS.forEach((x) => {
+    assert.equal(e.bolsa.historial[x.simbolo].length, 3);
+    assert.equal(e.bolsa.historial[x.simbolo][0], antes[x.simbolo]);
+    assert.ok(e.bolsa.precios[x.simbolo] >= 100);
+    // Nunca se mueve más que su variación + tendencia en un mes.
+    const h = e.bolsa.historial[x.simbolo];
+    assert.ok(Math.abs(h[2] / h[1] - 1) * 100 <= x.tendencia + x.variacion + 0.01);
+  });
+  assert.equal(e.historialMeses[0].bolsa.length, B.EMPRESAS.length);
+  assert.equal(B.variacionEmpresa(e, 'JUGO').meses, 2);
+
+  // Con la misma semilla, el mercado se mueve igual (resultados repetibles).
+  const otro = bancoConDos().e;
+  B.avanzarMes(otro);
+  B.avanzarMes(otro);
+  assert.deepEqual(otro.bolsa.precios, e.bolsa.precios);
+});
+
+test('seguridad: alerta por monto alto o fuera de lo normal', () => {
+  const { e, ana, luis } = bancoConDos();
+  assert.equal(B.revisarOperacion(e, ana, 49999).inusual, false);
+  assert.equal(B.revisarOperacion(e, ana, 50000).inusual, true);
+  // Tres transferencias pequeñas: el promedio es ₵20.00.
+  [2000, 2000, 2000].forEach((m) => B.transferir(e, ana.numero, luis.numero, m));
+  const r = B.revisarOperacion(e, ana, 7000);
+  assert.equal(r.inusual, true);
+  assert.equal(r.promedio, 2000);
+  assert.equal(B.revisarOperacion(e, ana, 6000).inusual, false);
+  e.config.umbralAlerta = 0;
+  assert.equal(B.revisarOperacion(e, luis, 90000).inusual, false);
+  B.registrarAlerta(e, ana.numero, 'Retiro', 7000, 'bloqueada');
+  assert.equal(ana.alertasSeguridad[0].resultado, 'bloqueada');
+});
+
+test('seguridad: el estudiante encuentra la operación sospechosa y recupera su dinero', () => {
+  const { e, ana } = bancoConDos();
+  const f = B.crearOperacionSospechosa(e, ana.numero, 15000, 'Compra en TiendaGlobal.net', 'corriente');
+  assert.equal(ana.saldos.corriente, 85000);
+  assert.equal(ana.movimientos[0].tipo, 'pago');
+  assert.equal(f.estado, 'pendiente');
+
+  // Reporta una operación suya: no hay devolución y se cuenta el intento.
+  B.retirar(e, ana.numero, 1000);
+  const fallo = B.reportarMovimiento(e, ana.numero, ana.movimientos[0].id);
+  assert.equal(fallo.acierto, false);
+  assert.equal(ana.reportesFallidos, 1);
+  assert.equal(f.intentos, 1);
+
+  const ok = B.reportarMovimiento(e, ana.numero, f.movimiento);
+  assert.equal(ok.acierto, true);
+  assert.equal(f.estado, 'detectado');
+  assert.equal(ana.saldos.corriente, 84000 + 15000);
+  assert.equal(ana.movimientos[0].tipo, 'reembolso');
+  assert.throws(() => B.reportarMovimiento(e, ana.numero, f.movimiento), /ya fue reportada/);
+  assert.throws(() => B.reportarMovimiento(e, ana.numero, ana.movimientos[0].id), /salida/);
+  assert.throws(() => B.crearOperacionSospechosa(e, ana.numero, 999999, 'Compra rara', 'corriente'), /saldo/);
+  assert.throws(() => B.crearOperacionSospechosa(e, ana.numero, 100, 'Compra rara', 'tarjeta'), /tarjeta/);
+});
+
+test('seguridad: el docente puede cancelar una operación sospechosa en la tarjeta', () => {
+  const { e, ana } = bancoConDos();
+  B.activarTarjeta(e, ana.numero);
+  const f = B.crearOperacionSospechosa(e, ana.numero, 30000, 'Pago a JuegosOnline Premium', 'tarjeta');
+  assert.equal(ana.movimientos[0].tipo, 'compra');
+  assert.equal(B.resumenTarjeta(ana).deuda, 30000);
+  B.cancelarOperacionSospechosa(e, ana.numero, f.id);
+  assert.equal(B.resumenTarjeta(ana).deuda, 0);
+  assert.equal(f.estado, 'cancelado');
+  assert.throws(() => B.cancelarOperacionSospechosa(e, ana.numero, f.id), /terminó/);
+});
+
+test('copias antiguas reciben la bolsa y los datos de seguridad', () => {
+  const vieja = B.estadoInicial();
+  delete vieja.bolsa;
+  vieja.clientes.push({ numero: '4A-001', nombre: 'Ana', pin: '1111', creadoMes: 1, saldos: { corriente: 100 }, prestamos: [], movimientos: [] });
+  const e = B.importar(JSON.stringify(vieja));
+  assert.equal(e.bolsa.precios.JUGO, 5000);
+  assert.deepEqual(e.clientes[0].acciones, {});
+  assert.deepEqual(e.clientes[0].fraudes, []);
+  assert.equal(e.config.comisionBolsa, 1);
+});
